@@ -2,6 +2,7 @@ import { fetchJson, FetchLike } from '../../../util/http';
 import { metersToMiles } from '../../../util/geo';
 import { TtlCache } from '../../../util/ttlCache';
 import { Route } from '../../types';
+import { routeKey } from './routeKey';
 import { RoutePath, RoutePathProvider, RoutingError } from './types';
 
 interface OsrmResponse {
@@ -57,10 +58,7 @@ export class CachedPathProvider implements RoutePathProvider {
   }
 
   getPath(route: Route): Promise<RoutePath> {
-    // About 10 m of precision: nearby starting points share a path.
-    const key = [route.origin, route.destination]
-      .map(p => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`)
-      .join('>');
+    const key = routeKey(route);
     return this.cache.get(key, () => this.inner.getPath(route));
   }
 }

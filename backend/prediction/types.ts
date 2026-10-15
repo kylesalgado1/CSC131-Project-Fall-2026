@@ -30,6 +30,8 @@ export type Confidence = 'High' | 'Medium' | 'Low';
 
 export interface Incident {
   description: string;
+  road?: string;
+  delayMinutes?: number;
 }
 
 export interface BaselineResult {
