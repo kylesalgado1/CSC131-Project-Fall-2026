@@ -1,5 +1,4 @@
 import { minutesBetween } from '../util/time';
-import { holidayName, LOCAL_TIME_ZONE, localTime } from './calendar';
 import { rainLabel } from './providers/weather';
 import {
   Confidence,
@@ -65,15 +64,16 @@ function waitReason({ wait, saved, delay }: Timing): string {
 }
 
 /** Holiday and rain warnings shown with the verdict. */
-function notesFor(
-  now: Date,
-  leaveNow: SlotPrediction,
-  chosen: SlotPrediction,
-): string[] {
+function notesFor(leaveNow: SlotPrediction, chosen: SlotPrediction): string[] {
   const notes: string[] = [];
-  const holiday = holidayName(localTime(now, LOCAL_TIME_ZONE).date);
-  if (holiday) {
-    notes.push(`Today is ${holiday}, so traffic may differ from a normal day.`);
+  if (leaveNow.holiday) {
+    notes.push(
+      `Today is ${leaveNow.holiday}, so traffic may differ from a normal day.`,
+    );
+  } else if (chosen.holiday) {
+    notes.push(
+      `Leaving then falls on ${chosen.holiday}, so traffic may differ from a normal day.`,
+    );
   }
   const rain = rainLabel(
     Math.max(leaveNow.weatherFactor ?? 1, chosen.weatherFactor ?? 1),
@@ -108,7 +108,7 @@ function buildVerdict(
     arrivalDelayMinutes: isNow ? 0 : delay,
     confidence: weakest.confidence,
     confidenceReason: weakest.confidenceReason,
-    notes: notesFor(now, leaveNow, chosen),
+    notes: notesFor(leaveNow, chosen),
     generatedAt: now,
     ...extra,
   };

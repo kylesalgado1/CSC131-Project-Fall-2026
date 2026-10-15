@@ -171,6 +171,67 @@ describe('TomTomRoutingClient', () => {
   });
 });
 
+describe('TomTomRoutingClient incidents', () => {
+  const incident = (road: string[] | undefined) => ({
+    geometry: { coordinates: [[-121.9, 38.4]] },
+    properties: {
+      id: 'x',
+      magnitudeOfDelay: 3,
+      delay: 600,
+      roadNumbers: road,
+      events: [{ description: 'Accident' }],
+    },
+  });
+  const read = async (road: string[] | undefined) => {
+    const { fetchFn, options, sent } = fakeEnv([
+      { status: 200, body: { incidents: [incident(road)] } },
+    ]);
+    const [parsed] = await new TomTomRoutingClient(
+      KEY,
+      fetchFn,
+      options,
+    ).incidents({
+      minLat: 38,
+      minLng: -122,
+      maxLat: 39,
+      maxLng: -121,
+    });
+    return { parsed, url: new URL(sent[0].url) };
+  };
+
+  it('asks for a box in longitude, latitude order', async () => {
+    const { url } = await read(['I-80 W']);
+    expect(url.pathname).toBe('/traffic/services/5/incidentDetails');
+    expect(url.searchParams.get('bbox')).toBe('-122,38,-121,39');
+    expect(url.searchParams.get('timeValidityFilter')).toBe('present');
+  });
+
+  it('reads the incident, with coordinates as latitude and longitude', async () => {
+    const { parsed } = await read(['I-80 W']);
+    expect(parsed).toMatchObject({
+      id: 'x',
+      description: 'Accident',
+      road: 'I-80 W',
+      magnitude: 3,
+      delayMinutes: 10,
+      points: [{ lat: 38.4, lng: -121.9 }],
+    });
+  });
+
+  it.each([
+    [['I-80 W'], 'W'],
+    [['CA-113 S'], 'S'],
+    [['I-80 Bus E'], 'E'],
+    [['I-80'], undefined],
+    [['I-80 Bus'], undefined],
+    [['SR-12 West'], undefined],
+    [[], undefined],
+    [undefined, undefined],
+  ])('reads the direction from %p as %p', async (road, compass) => {
+    expect((await read(road)).parsed.compass).toBe(compass);
+  });
+});
+
 describe('TomTomPathProvider', () => {
   it("returns the path with TomTom's no-traffic time as free-flow", async () => {
     const { fetchFn, options } = fakeEnv([{ status: 200 }]);

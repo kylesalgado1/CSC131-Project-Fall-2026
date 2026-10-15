@@ -36,6 +36,8 @@ export interface TomTomIncident {
   id?: string;
   description: string;
   road?: string;
+  /** The direction of travel in the road label, such as the W in "I-80 W". */
+  compass?: 'N' | 'E' | 'S' | 'W';
   /** 0 unknown, 1 minor, 2 moderate, 3 major, 4 closure or other. */
   magnitude: number;
   delayMinutes: number;
@@ -208,6 +210,9 @@ function parseIncidents(body: TomTomIncidentsResponse): TomTomIncident[] {
       .filter(Boolean)
       .join('; '),
     road: p.roadNumbers?.[0],
+    compass: /\s([NESW])$/.exec(p.roadNumbers?.[0] ?? '')?.[1] as
+      | TomTomIncident['compass']
+      | undefined,
     magnitude: p.magnitudeOfDelay ?? 0,
     delayMinutes: (p.delay ?? 0) / 60,
     points: pointsOf(geometry?.coordinates),

@@ -1,4 +1,4 @@
-import { Confidence, LiveAdjustment } from './types';
+import { BaselineResult, Confidence, LiveAdjustment } from './types';
 
 /** Fewer days of history than this and the baseline is not trusted. */
 export const MIN_SAMPLES = 20;
@@ -13,8 +13,7 @@ export const MEDIUM_OBSERVED_SHARE = 0.5;
  * first rule that applies wins, from the strongest reason for doubt down.
  */
 export function assessConfidence(
-  sampleCount: number,
-  observedShare: number | undefined,
+  { sampleCount, observedShare, basis }: BaselineResult,
   live: LiveAdjustment,
 ): { confidence: Confidence; reason: string } {
   const share = observedShare ?? 1; // a source that does not say is not penalized
@@ -27,6 +26,12 @@ export function assessConfidence(
       applies: live.incidents.length > 0,
       confidence: 'Low',
       reason: 'An incident on your route could change this estimate.',
+    },
+    {
+      applies: basis === 'holiday_estimate',
+      confidence: 'Low',
+      reason:
+        'This is a holiday or campus break, so traffic is a guess based on a typical weekend.',
     },
     {
       applies: sampleCount < MIN_SAMPLES,

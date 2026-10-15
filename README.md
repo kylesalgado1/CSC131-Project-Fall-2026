@@ -25,6 +25,17 @@ If your network blocks the connection (campus Wi-Fi often does), use `npx expo s
 
 Expo Go can't run everything. Remote push notifications and background location need a development build (see below).
 
+### Try the verdict screen
+
+The app's main screen asks the backend whether to leave now or wait, and shows the answer with both choices, the arrival times, how sure the app is, and any heads-up such as rain.
+
+1. **Start the backend** in one terminal: `cd backend && npm run serve`. It needs `backend/.env` (see Backend below). With `TOMTOM_API_KEY` set it uses live TomTom traffic; without it, PeMS data.
+2. **Start the app** in another terminal: `npm start`, then scan the QR code with Expo Go. Your phone and computer must be on the same Wi-Fi.
+
+The app finds the backend at the same address Expo loaded it from, on port 3000. If that does not work (a tunnel, or a firewall), give it the address directly: `EXPO_PUBLIC_API_URL=http://YOUR-COMPUTER-IP:3000 npm start`. Your computer may ask to allow incoming connections for Node the first time.
+
+The screen refreshes itself every 5 minutes while open, and says when the advice changes. Real traffic on the demo commute rarely says "wait", so under **Data** you can switch to **Sample: Wait**, **Sample: Leave now** or **Sample: Running late** to see every state. Samples are labeled as made-up data on screen. The trip list and settings are stand-ins for trip setup (Epic 3) and preferences (Epic 6).
+
 ### Run on an emulator
 
 ```sh
@@ -67,7 +78,15 @@ npm run import-pems -- \
 
 - One "now" request per trip gives the route path, the no-traffic time, the typical time for right now, and the time with traffic right now.
 - The typical drive time for each of the 13 departure slots comes from TomTom's departure-time predictions, fetched every 30 minutes and interpolated in between. A new trip costs about 10 requests (about 2.7 seconds); repeats within half an hour are instant.
-- **Live delay** is how much slower than typical it is right now, fading out over an hour. **Incidents** are TomTom reports of moderate or major delays, closures, or delays of five minutes or more that lie on the route. An incident drops confidence to Low.
+- **Live delay** is how much slower than typical it is right now, fading out over an hour. **Incidents** are TomTom reports of moderate or major delays, closures, or delays of five minutes or more that lie on the route and are heading the same way as you (a crash on the other side of the freeway does not count). The direction comes from the road label, such as "I-80 W", or from the shape of the incident. An incident drops confidence to Low.
+- **Holidays and campus breaks:** TomTom's history is by weekday and knows nothing of holidays, so on a US holiday or a campus break the app asks TomTom about the same time on the coming Saturday instead. That is a rough guess, so the answer is marked as an estimate, confidence reads Low, and the verdict says it is a holiday. To add campus breaks such as spring break, list them in `backend/config/campus-breaks.json` (or point `CAMPUS_BREAKS_FILE` at another file), using dates from your school's official calendar:
+
+  ```json
+  [{ "name": "Spring break", "start": "2027-03-22", "end": "2027-03-26" }]
+  ```
+
+  Both days are included. The file starts empty, and the server refuses to start if an entry is malformed.
+
 - Everything TomTom sends is kept **in memory only, for minutes**. Do not store it in the database: TomTom's terms on storing responses are not clear for free plans, so check them before extending that.
 - The free plan allows about 2,500 requests a day and rate limits bursts. The client spaces requests out and retries when TomTom says "too many requests".
 

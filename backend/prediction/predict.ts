@@ -1,4 +1,5 @@
 import { addMinutes } from '../util/time';
+import { CampusBreak, localTime, specialDayName } from './calendar';
 import { assessConfidence } from './confidence';
 import { BaselineProvider } from './providers/baseline';
 import { liveUnavailable, LiveConditionsProvider } from './providers/live';
@@ -28,6 +29,8 @@ export interface PredictionProviders {
   live: LiveConditionsProvider;
   /** Optional. Without it, or when it fails, rain is not accounted for. */
   weather?: WeatherProvider;
+  /** Local breaks such as spring break, flagged on slots and in the notes. */
+  campusBreaks?: CampusBreak[];
 }
 
 const midpointOf = ({ origin, destination }: Route): LatLng => ({
@@ -44,7 +47,7 @@ const midpointOf = ({ origin, destination }: Route): LatLng => ({
  */
 export async function predictSlots(
   request: TripRequest,
-  { baseline, live: liveSource, weather }: PredictionProviders,
+  { baseline, live: liveSource, weather, campusBreaks }: PredictionProviders,
 ): Promise<SlotPrediction[]> {
   const { route, now } = request;
   const departures = SLOT_OFFSETS.map(offset => addMinutes(now, offset));
@@ -72,11 +75,7 @@ export async function predictSlots(
       1,
       Math.round(base.minutes * weatherFactor + live.extraMinutes * liveFade),
     );
-    const { confidence, reason } = assessConfidence(
-      base.sampleCount,
-      base.observedShare,
-      live,
-    );
+    const { confidence, reason } = assessConfidence(base, live);
     return {
       departAt,
       driveMinutes,
@@ -84,6 +83,7 @@ export async function predictSlots(
       confidence,
       confidenceReason: reason,
       weatherFactor,
+      holiday: specialDayName(localTime(departAt).date, campusBreaks),
     };
   });
 }

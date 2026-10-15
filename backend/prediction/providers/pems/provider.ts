@@ -5,7 +5,6 @@ import {
   localTime,
   LOCAL_TIME_ZONE,
 } from '../../calendar';
-import { MIN_SAMPLES } from '../../confidence';
 import { BaselineResult, Route } from '../../types';
 import { BaselineProvider } from '../baseline';
 import { ProfileKey, ProfileStore } from './store';
@@ -157,13 +156,9 @@ export class PemsBaselineProvider implements BaselineProvider {
 
     // The median keeps one sparse station from sinking confidence for a long
     // route, while a route that is mostly uncovered still reads as sparse.
-    let sampleCount = median(
+    const sampleCount = median(
       segments.map(s => byStation.get(s.stationId)?.sampleCount ?? 0),
     );
-    if (estimatedFromWeekends) {
-      // Holiday traffic estimated from weekends is a guess, so never trust it.
-      sampleCount = Math.min(sampleCount, MIN_SAMPLES - 1);
-    }
 
     // How much of the route's length rests on measured readings. A station
     // with no data, and any length without a station, counts as estimated.
@@ -178,6 +173,8 @@ export class PemsBaselineProvider implements BaselineProvider {
       minutes,
       sampleCount,
       observedShare: measuredMiles / (coveredMiles + uncoveredMiles),
+      // Holiday traffic estimated from weekends is a guess, and says so.
+      basis: estimatedFromWeekends ? 'holiday_estimate' : undefined,
     };
   }
 }
