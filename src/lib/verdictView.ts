@@ -1,11 +1,21 @@
 import { Verdict } from '../api/types';
-import { formatTime, plural } from './format';
+import { formatDuration, formatTime, plural } from './format';
 
-/** The two answers the main screen can give. */
-export function headline(verdict: Verdict): string {
-  return verdict.action === 'leave_now'
-    ? 'Leave now'
-    : `Wait ${plural(verdict.waitMinutes, 'minute')}`;
+type TimeOptions = { locale?: string; timeZone?: string };
+
+/** The answers the main screen can give. */
+export function headline(verdict: Verdict, timeOptions?: TimeOptions): string {
+  switch (verdict.action) {
+    case 'leave_now':
+      return 'Leave now';
+    case 'leave_later':
+      return `Leave at ${formatTime(
+        verdict.recommended.departAt,
+        timeOptions,
+      )}`;
+    default:
+      return `Wait ${plural(verdict.waitMinutes, 'minute')}`;
+  }
 }
 
 /** How the screen should feel: calm, informative, or a warning. */
@@ -31,7 +41,7 @@ export interface OptionView {
 /** Leaving now and, when it differs, the recommended wait, side by side. */
 export function optionViews(
   verdict: Verdict,
-  timeOptions?: { locale?: string; timeZone?: string },
+  timeOptions?: TimeOptions,
 ): OptionView[] {
   const view = (
     title: string,
@@ -52,12 +62,15 @@ export function optionViews(
   if (verdict.action === 'leave_now') {
     return [now];
   }
-  return [now, view(headline(verdict), verdict.recommended, true)];
+  const title =
+    verdict.action === 'leave_later' ? 'Leave later' : headline(verdict);
+  return [now, view(title, verdict.recommended, true)];
 }
 
 /** The numbers behind a wait: minutes saved in the car and arriving later. */
 export function tradeoffLines(verdict: Verdict): string[] {
-  if (verdict.action === 'leave_now') {
+  // A planned departure hours away is not a trade of time for time.
+  if (verdict.action !== 'wait') {
     return [];
   }
   const { minutesSaved, arrivalDelayMinutes } = verdict;
@@ -70,6 +83,40 @@ export function tradeoffLines(verdict: Verdict): string[] {
   return [`Save ${plural(minutesSaved, 'minute')} in the car`, arrival];
 }
 
+/** Lines under the answer: room before the deadline, and the latest time to go. */
+export function deadlineLines(
+  verdict: Verdict,
+  timeOptions?: TimeOptions,
+): string[] {
+  const { deadline } = verdict;
+  if (!deadline) {
+    return [];
+  }
+  const arrive = formatTime(verdict.recommended.arriveAt, timeOptions);
+  const by = formatTime(deadline.arriveBy, timeOptions);
+  const lines = [
+    deadline.marginMinutes <= 0
+      ? `You would arrive ${arrive}, right at your ${by} deadline.`
+      : `You would arrive ${arrive}, ${formatDuration(
+          deadline.marginMinutes,
+        )} before your ${by} deadline.`,
+  ];
+  const latest = deadline.latestDeparture;
+  const gap = latest
+    ? (Date.parse(latest.departAt) - Date.parse(verdict.recommended.departAt)) /
+      60_000
+    : 0;
+  if (latest && gap >= CHANGE_THRESHOLD_MINUTES) {
+    lines.push(
+      `Latest you can leave and still make it: ${formatTime(
+        latest.departAt,
+        timeOptions,
+      )}.`,
+    );
+  }
+  return lines;
+}
+
 const CHANGE_THRESHOLD_MINUTES = 5;
 
 /**
@@ -80,7 +127,7 @@ const CHANGE_THRESHOLD_MINUTES = 5;
 export function departureChange(
   previous: Verdict | undefined,
   next: Verdict,
-  timeOptions?: { locale?: string; timeZone?: string },
+  timeOptions?: TimeOptions,
 ): string | undefined {
   if (!previous) {
     return undefined;
@@ -96,6 +143,9 @@ export function departureChange(
   const when = formatTime(next.recommended.departAt, timeOptions);
   if (next.action === 'leave_now') {
     return 'Update: traffic changed, so you should leave now.';
+  }
+  if (next.action === 'leave_later' && flipped) {
+    return `Update: the plan changed, so the best time to leave is ${when}.`;
   }
   return shift < 0 || flipped
     ? `Update: the best time to leave is now ${when}, ${

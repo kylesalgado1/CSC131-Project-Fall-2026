@@ -1,6 +1,7 @@
 import { Verdict } from '../../api/types';
 import { sampleResponse } from '../../samples';
 import {
+  deadlineLines,
   departureChange,
   headline,
   optionViews,
@@ -122,5 +123,114 @@ describe('departureChange', () => {
 
   it('ignores identical advice', () => {
     expect(departureChange(wait, wait, time)).toBeUndefined();
+  });
+});
+
+// Leaving at 11:00 AM Pacific for a 1:30 PM deadline, 60-minute drive.
+const planned: Verdict = {
+  ...leaveNow,
+  action: 'leave_later',
+  waitMinutes: 240,
+  recommended: {
+    departAt: '2026-10-21T18:00:00.000Z',
+    arriveAt: '2026-10-21T19:00:00.000Z',
+    driveMinutes: 60,
+  },
+  deadline: {
+    arriveBy: '2026-10-21T20:30:00.000Z',
+    marginMinutes: 90,
+    latestDeparture: {
+      departAt: '2026-10-21T19:15:00.000Z',
+      arriveAt: '2026-10-21T20:15:00.000Z',
+      driveMinutes: 60,
+    },
+  },
+};
+
+describe('a planned departure', () => {
+  it('has the time to leave as its headline', () => {
+    expect(headline(planned, time)).toBe('Leave at 11:00 AM');
+    expect(toneOf(planned)).toBe('wait');
+  });
+
+  it('shows leaving now beside leaving later, with no wait-style tradeoff', () => {
+    const options = optionViews(planned, time);
+    expect(options.map(o => [o.title, o.recommended])).toEqual([
+      ['Leave now', false],
+      ['Leave later', true],
+    ]);
+    expect(options[1].leave).toBe('Leave 11:00 AM');
+    expect(tradeoffLines(planned)).toEqual([]);
+  });
+
+  it('notices when the plan first appears, or moves', () => {
+    expect(departureChange(leaveNow, planned, time)).toBe(
+      'Update: the plan changed, so the best time to leave is 11:00 AM.',
+    );
+    const later = {
+      ...planned,
+      recommended: {
+        ...planned.recommended,
+        departAt: '2026-10-21T18:30:00.000Z',
+      },
+    };
+    expect(departureChange(planned, later, time)).toBe(
+      'Update: the best time to leave moved later, to 11:30 AM.',
+    );
+    expect(departureChange(planned, planned, time)).toBeUndefined();
+  });
+});
+
+describe('deadlineLines', () => {
+  it('says when you would arrive, how much room that leaves, and the latest to leave', () => {
+    expect(deadlineLines(planned, time)).toEqual([
+      'You would arrive 12:00 PM, 1 hr 30 min before your 1:30 PM deadline.',
+      'Latest you can leave and still make it: 12:15 PM.',
+    ]);
+  });
+
+  it('is empty without a deadline', () => {
+    expect(deadlineLines(leaveNow, time)).toEqual([]);
+  });
+
+  it('leaves out the latest time when it is the time already recommended, or not known', () => {
+    const same = {
+      ...planned,
+      deadline: {
+        ...planned.deadline!,
+        latestDeparture: { ...planned.recommended },
+      },
+    };
+    expect(deadlineLines(same, time)).toHaveLength(1);
+    const unknown = {
+      ...planned,
+      deadline: { ...planned.deadline!, latestDeparture: undefined },
+    };
+    expect(deadlineLines(unknown, time)).toHaveLength(1);
+    const close = {
+      ...planned,
+      deadline: {
+        ...planned.deadline!,
+        latestDeparture: {
+          ...planned.recommended,
+          departAt: '2026-10-21T18:04:00.000Z',
+        },
+      },
+    };
+    expect(deadlineLines(close, time)).toHaveLength(1);
+  });
+
+  it('handles no room at all', () => {
+    const tight = {
+      ...planned,
+      deadline: {
+        ...planned.deadline!,
+        marginMinutes: 0,
+        latestDeparture: undefined,
+      },
+    };
+    expect(deadlineLines(tight, time)[0]).toBe(
+      'You would arrive 12:00 PM, right at your 1:30 PM deadline.',
+    );
   });
 });

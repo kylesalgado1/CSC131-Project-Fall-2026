@@ -1,7 +1,8 @@
 import { StatusBar } from 'expo-status-bar';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -14,32 +15,76 @@ import {
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 import { defaultBaseUrl } from './src/api/baseUrl';
+import { LatLng } from './src/api/types';
 import { Attribution } from './src/components/Attribution';
+import { Collapsible } from './src/components/Collapsible';
+import { DemoPanel } from './src/components/DemoPanel';
+import { EmptyState } from './src/components/EmptyState';
 import { Notice } from './src/components/Notice';
-import { SettingsPanel } from './src/components/SettingsPanel';
+import { PlaceSearchModal } from './src/components/PlaceSearchModal';
+import { PreferencesPanel } from './src/components/PreferencesPanel';
 import { useTheme } from './src/components/theme';
+import { TimeLimitsCard } from './src/components/TimeLimitsCard';
+import { TimePickerSheet } from './src/components/TimePickerSheet';
+import { TripCard } from './src/components/TripCard';
 import { VerdictCard } from './src/components/VerdictCard';
+import { useTrip } from './src/hooks/useTrip';
 import { useVerdict, VerdictSource } from './src/hooks/useVerdict';
+import { ClockTime, suggestedTime } from './src/lib/clockTime';
 import { formatTime } from './src/lib/format';
 import { DEFAULT_SETTINGS, VerdictSettings } from './src/lib/request';
-import { DEMO_TRIPS } from './src/trips';
+import { summarizeSettings } from './src/lib/settingsSummary';
+import { lastKnownLocation } from './src/location/currentLocation';
+import { LocationError } from './src/location/errors';
+import { startLabel, swapped } from './src/trip/types';
 
 interface Props {
   /** For tests. */
   baseUrl?: string;
   fetchFn?: typeof fetch;
+  locate?: () => Promise<LatLng>;
 }
 
-function Screen({ baseUrl = defaultBaseUrl(), fetchFn }: Props) {
+function Screen({ baseUrl = defaultBaseUrl(), fetchFn, locate }: Props) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const [tripId, setTripId] = useState(DEMO_TRIPS[0].id);
+  const { trip, recents, ready, setFrom, setTo, swap } = useTrip();
   const [source, setSource] = useState<VerdictSource>('live');
   const [settings, setSettings] = useState<VerdictSettings>(DEFAULT_SETTINGS);
-  const trip = DEMO_TRIPS.find(t => t.id === tripId) ?? DEMO_TRIPS[0];
+  const [picking, setPicking] = useState<'from' | 'to' | undefined>();
+  // Which time the sheet is for, kept after it closes so the title does not
+  // change while the sheet slides away.
+  const [timeField, setTimeField] = useState<'leaveBy' | 'arriveBy'>('leaveBy');
+  const [timeSheetOpen, setTimeSheetOpen] = useState(false);
+  const editTime = (field: 'leaveBy' | 'arriveBy') => {
+    setTimeField(field);
+    setTimeSheetOpen(true);
+  };
+  // Where the phone last was, used to rank place search results.
+  const [located, setLocated] = useState<LatLng | undefined>();
 
-  const state = useVerdict({ source, trip, settings, baseUrl, fetchFn });
+  useEffect(() => {
+    lastKnownLocation().then(position => {
+      if (position) {
+        setLocated(current => current ?? position);
+      }
+    });
+  }, []);
+
+  const state = useVerdict({
+    source,
+    trip,
+    settings,
+    baseUrl,
+    fetchFn,
+    locate,
+    onLocated: setLocated,
+  });
   const { response, loading, refreshing, error, updatedAt, change } = state;
+  const near =
+    located ?? (trip.from.kind === 'place' ? trip.from.place : trip.to);
+  const live = source === 'live';
+  const locationError = error instanceof LocationError ? error : undefined;
 
   return (
     <ScrollView
@@ -48,6 +93,7 @@ function Screen({ baseUrl = defaultBaseUrl(), fetchFn }: Props) {
         styles.content,
         { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 32 },
       ]}
+      keyboardShouldPersistTaps="handled"
       refreshControl={
         <RefreshControl
           refreshing={refreshing && !loading}
@@ -57,13 +103,30 @@ function Screen({ baseUrl = defaultBaseUrl(), fetchFn }: Props) {
     >
       <Text style={[styles.title, { color: theme.text }]}>Wait It Out</Text>
       <Text style={[styles.subtitle, { color: theme.muted }]}>
-        {trip.label}
+        Know when to leave
       </Text>
 
-      {source !== 'live' ? (
+      <TripCard
+        fromLabel={startLabel(trip.from)}
+        fromIsCurrent={trip.from.kind === 'current'}
+        locating={state.locating}
+        toLabel={trip.to?.name}
+        onPressFrom={() => setPicking('from')}
+        onPressTo={() => setPicking('to')}
+        onSwap={swapped(trip) ? swap : undefined}
+      />
+
+      <TimeLimitsCard
+        leaveBy={settings.leaveBy}
+        arriveBy={settings.arriveBy}
+        onEditLeaveBy={() => editTime('leaveBy')}
+        onEditArriveBy={() => editTime('arriveBy')}
+      />
+
+      {!live ? (
         <Notice kind="info" title="Sample data">
           This is a made-up answer to show what the screen looks like. It is not
-          live traffic.
+          live traffic, and it ignores the trip above.
         </Notice>
       ) : null}
 
@@ -73,17 +136,55 @@ function Screen({ baseUrl = defaultBaseUrl(), fetchFn }: Props) {
         </Notice>
       ) : null}
 
-      {error && !response ? (
-        <Notice kind="error" title="Something went wrong">
-          {error.message}
+      {locationError ? (
+        <Notice
+          kind="error"
+          title="Can't find your location"
+          actions={[
+            ...(locationError.problem === 'denied'
+              ? [
+                  {
+                    label: 'Open Settings',
+                    onPress: () => Linking.openSettings(),
+                  },
+                ]
+              : []),
+            {
+              label: 'Choose a starting address',
+              onPress: () => setPicking('from'),
+            },
+            { label: 'Try again', onPress: state.refresh },
+          ]}
+        >
+          {locationError.message}
+        </Notice>
+      ) : error ? (
+        <Notice
+          kind="error"
+          title={response ? 'Could not refresh' : 'Something went wrong'}
+        >
+          {response
+            ? `${error.message} Showing the last answer.`
+            : error.message}
         </Notice>
       ) : null}
 
-      {loading && !error ? (
+      {!ready ? (
+        <View style={styles.loading}>
+          <ActivityIndicator color={theme.accent} />
+        </View>
+      ) : live && !trip.to ? (
+        <EmptyState
+          onChooseDestination={() => setPicking('to')}
+          onPick={setTo}
+        />
+      ) : loading && !error ? (
         <View style={styles.loading}>
           <ActivityIndicator color={theme.accent} />
           <Text style={[styles.loadingText, { color: theme.muted }]}>
-            Checking traffic for the next three hours...
+            {state.locating
+              ? 'Finding your location...'
+              : 'Checking traffic for the next three hours...'}
           </Text>
         </View>
       ) : null}
@@ -94,17 +195,11 @@ function Screen({ baseUrl = defaultBaseUrl(), fetchFn }: Props) {
         </View>
       ) : null}
 
-      {response && error ? (
-        <Notice kind="error" title="Could not refresh">
-          {`${error.message} Showing the last answer.`}
-        </Notice>
-      ) : null}
-
       {updatedAt ? (
         <View style={styles.footer}>
           <Text style={[styles.updated, { color: theme.muted }]}>
             Updated {formatTime(updatedAt)}
-            {source === 'live' ? ' · refreshes every 5 minutes' : ''}
+            {live ? ' · refreshes every 5 minutes' : ''}
           </Text>
           <Pressable
             accessibilityRole="button"
@@ -117,23 +212,67 @@ function Screen({ baseUrl = defaultBaseUrl(), fetchFn }: Props) {
           </Pressable>
         </View>
       ) : null}
+      {response && live ? <Attribution /> : null}
 
-      {response && source === 'live' ? <Attribution /> : null}
+      <Collapsible title="Preferences" summary={summarizeSettings(settings)}>
+        <PreferencesPanel settings={settings} onChange={setSettings} />
+      </Collapsible>
 
-      <SettingsPanel
-        tripId={tripId}
-        onTripChange={setTripId}
-        source={source}
-        onSourceChange={setSource}
-        settings={settings}
-        onSettingsChange={setSettings}
-      />
+      <Collapsible
+        title="Demo options"
+        summary={live ? 'Live traffic' : 'Showing a sample'}
+      >
+        <DemoPanel source={source} onChange={setSource} />
+      </Collapsible>
 
-      {source === 'live' ? (
+      {live ? (
         <Text style={[styles.server, { color: theme.muted }]}>
           Server: {baseUrl}
         </Text>
       ) : null}
+
+      <TimePickerSheet
+        visible={timeSheetOpen}
+        title={timeField === 'arriveBy' ? 'Arrive by' : 'Leave by'}
+        explanation={
+          timeField === 'arriveBy'
+            ? 'The latest you need to get there. The app will not suggest a plan that arrives later.'
+            : 'The latest you want to be on the road. The app will not tell you to wait past it.'
+        }
+        current={settings[timeField]}
+        fallback={suggestedTime(new Date(), timeField === 'arriveBy' ? 90 : 30)}
+        onSet={(time: ClockTime) => {
+          setSettings(current => ({ ...current, [timeField]: time }));
+          setTimeSheetOpen(false);
+        }}
+        onClear={() => {
+          setSettings(current => ({ ...current, [timeField]: undefined }));
+          setTimeSheetOpen(false);
+        }}
+        onClose={() => setTimeSheetOpen(false)}
+      />
+
+      <PlaceSearchModal
+        visible={picking !== undefined}
+        mode={picking ?? 'to'}
+        onClose={() => setPicking(undefined)}
+        onPick={place => {
+          if (picking === 'from') {
+            setFrom({ kind: 'place', place });
+          } else {
+            setTo(place);
+          }
+          setPicking(undefined);
+        }}
+        onPickCurrent={() => {
+          setFrom({ kind: 'current' });
+          setPicking(undefined);
+        }}
+        recents={recents}
+        baseUrl={baseUrl}
+        near={near}
+        fetchFn={fetchFn}
+      />
     </ScrollView>
   );
 }
@@ -150,8 +289,8 @@ export default function App(props: Props) {
 
 const styles = StyleSheet.create({
   content: { paddingHorizontal: 18 },
-  title: { fontSize: 28, fontWeight: '800', letterSpacing: -0.4 },
-  subtitle: { fontSize: 16, marginTop: 2, marginBottom: 6 },
+  title: { fontSize: 30, fontWeight: '800', letterSpacing: -0.5 },
+  subtitle: { fontSize: 16, marginTop: 2 },
   loading: { alignItems: 'center', paddingVertical: 36 },
   loadingText: { marginTop: 10, fontSize: 14 },
   verdict: { marginTop: 14 },

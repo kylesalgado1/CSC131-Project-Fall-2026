@@ -11,6 +11,14 @@
     "android": {
       "package": "com.waititout"
     },
-    "plugins": ["expo-status-bar"]
+    "plugins": [
+      "expo-status-bar",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Wait It Out uses your location to start your trip from where you are. It is only used while the app is open."
+        }
+      ]
+    ]
   }
 }

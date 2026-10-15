@@ -73,4 +73,61 @@ describe('VerdictCard', () => {
     expect(hasText(render('leave_now'), 'High confidence')).toBe(true);
     expect(hasText(render('late'), 'Low confidence')).toBe(true);
   });
+
+  it('shows a planned departure: the time, the room to spare and the latest time to go', () => {
+    const base = sampleResponse('leave_now', NOW).verdict;
+    const verdict = {
+      ...base,
+      action: 'leave_later' as const,
+      waitMinutes: 240,
+      reason: 'Your deadline is 6 hours away, so there is no rush.',
+      recommended: {
+        departAt: '2026-10-21T18:00:00.000Z',
+        arriveAt: '2026-10-21T19:00:00.000Z',
+        driveMinutes: 60,
+      },
+      deadline: {
+        arriveBy: '2026-10-21T20:30:00.000Z',
+        marginMinutes: 90,
+        latestDeparture: {
+          departAt: '2026-10-21T19:15:00.000Z',
+          arriveAt: '2026-10-21T20:15:00.000Z',
+          driveMinutes: 60,
+        },
+      },
+    };
+    let renderer!: ReactTestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = ReactTestRenderer.create(
+        <VerdictCard verdict={verdict} timeOptions={time} />,
+      );
+    });
+    const text = allText(renderer.root);
+    expect(text).toContain('Leave at 11:00 AM');
+    expect(text).toContain(
+      'Your deadline is 6 hours away, so there is no rush.',
+    );
+    expect(text).toContain(
+      'You would arrive 12:00 PM, 1 hr 30 min before your 1:30 PM deadline.',
+    );
+    expect(text).toContain('Latest you can leave and still make it: 12:15 PM.');
+    expect(text).toEqual(expect.arrayContaining(['Leave now', 'Leave later']));
+  });
+
+  it('shows the room to spare under "Leave now" too', () => {
+    const base = sampleResponse('leave_now', NOW).verdict;
+    const verdict = {
+      ...base,
+      deadline: { arriveBy: '2026-10-21T20:30:00.000Z', marginMinutes: 330 },
+    };
+    let renderer!: ReactTestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = ReactTestRenderer.create(
+        <VerdictCard verdict={verdict} timeOptions={time} />,
+      );
+    });
+    expect(allText(renderer.root)).toContain(
+      'You would arrive 7:56 AM, 5 hr 30 min before your 1:30 PM deadline.',
+    );
+  });
 });

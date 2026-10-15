@@ -10,11 +10,22 @@ export interface LatLng {
   lng: number;
 }
 
+/** A place a user can pick as a start or a destination. */
+export interface Place extends LatLng {
+  id: string;
+  /** Short name to show: a business, a campus, or the street address. */
+  name: string;
+  /** The full address, to show beneath the name. */
+  address: string;
+}
+
 export interface VerdictRequest {
   origin: LatLng;
   destination: LatLng;
-  /** ISO 8601 deadline. */
+  /** ISO 8601 deadline: the latest time to be there. */
   arriveBy?: string;
+  /** ISO 8601: the latest time to be on the road. */
+  leaveBy?: string;
   preferences?: {
     goal?: Goal;
     maxWaitMinutes?: number;
@@ -28,8 +39,18 @@ export interface DepartureOption {
   driveMinutes: number;
 }
 
+/** How the answer sits against the arrive-by deadline. */
+export interface DeadlineInfo {
+  arriveBy: string;
+  /** Minutes to spare between the recommended arrival and the deadline. */
+  marginMinutes: number;
+  /** The last departure that still arrives in time, when it can be found. */
+  latestDeparture?: DepartureOption;
+}
+
 export interface Verdict {
-  action: 'leave_now' | 'wait';
+  /** `leave_later` is a departure time for a deadline far off. */
+  action: 'leave_now' | 'wait' | 'leave_later';
   waitMinutes: number;
   reason: string;
   leaveNow: DepartureOption;
@@ -38,6 +59,8 @@ export interface Verdict {
   arrivalDelayMinutes: number;
   /** Set when no departure meets the deadline. */
   lateByMinutes?: number;
+  /** Set when there is a deadline and the recommended option meets it. */
+  deadline?: DeadlineInfo;
   confidence: Confidence;
   confidenceReason: string;
   notes: string[];

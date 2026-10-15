@@ -1,6 +1,5 @@
-import { Goal, VerdictRequest } from '../api/types';
-import { Trip } from '../trips';
-import { parseArriveBy } from './arriveBy';
+import { Goal, LatLng, VerdictRequest } from '../api/types';
+import { ClockTime, nextOccurrence } from './clockTime';
 
 export interface VerdictSettings {
   goal: Goal;
@@ -8,30 +7,36 @@ export interface VerdictSettings {
   maxWaitMinutes: number;
   /** Waiting must save at least this much to be recommended. */
   minSavingsMinutes: number;
-  /** What the user typed for the arrival deadline. Empty for none. */
-  arriveByText: string;
+  /** The latest time to be there. Absent for no deadline. */
+  arriveBy?: ClockTime;
+  /** The latest time to be on the road. Absent for no limit. */
+  leaveBy?: ClockTime;
 }
 
 export const DEFAULT_SETTINGS: VerdictSettings = {
   goal: 'balance',
   maxWaitMinutes: 90,
   minSavingsMinutes: 10,
-  arriveByText: '',
 };
 
-/** The request for a trip. A deadline is re-read each time, so "8:30" keeps meaning the next 8:30. */
+/**
+ * The request for a trip. A time of day means the next time the clock shows
+ * it, worked out fresh each time, so "8:30" keeps meaning the next 8:30.
+ */
 export function buildRequest(
-  trip: Trip,
+  origin: LatLng,
+  destination: LatLng,
   settings: VerdictSettings,
   now: Date,
 ): VerdictRequest {
-  const arriveBy = parseArriveBy(settings.arriveByText, now);
+  const { arriveBy, leaveBy } = settings;
   return {
-    origin: trip.origin,
-    destination: trip.destination,
-    ...(arriveBy.kind === 'ok'
-      ? { arriveBy: arriveBy.date.toISOString() }
+    origin: { lat: origin.lat, lng: origin.lng },
+    destination: { lat: destination.lat, lng: destination.lng },
+    ...(arriveBy
+      ? { arriveBy: nextOccurrence(arriveBy, now).toISOString() }
       : {}),
+    ...(leaveBy ? { leaveBy: nextOccurrence(leaveBy, now).toISOString() } : {}),
     preferences: {
       goal: settings.goal,
       maxWaitMinutes: settings.maxWaitMinutes,

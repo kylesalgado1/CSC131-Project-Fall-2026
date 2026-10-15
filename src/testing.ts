@@ -1,5 +1,6 @@
-import { Text, TextInput } from 'react-native';
-import { act, ReactTestInstance } from 'react-test-renderer';
+import { ActivityIndicator, Text, TextInput } from 'react-native';
+import { createElement } from 'react';
+import ReactTestRenderer, { act, ReactTestInstance } from 'react-test-renderer';
 
 const flatten = (children: unknown): string =>
   Array.isArray(children)
@@ -70,5 +71,98 @@ export function tapLink(root: ReactTestInstance, label: string): void {
   }
   act(() => {
     link.props.onPress();
+  });
+}
+
+/**
+ * Runs a hook inside a throwaway component and hands back its latest value,
+ * so hooks can be tested without a screen.
+ */
+export function renderHook<T>(hook: () => T) {
+  const result = { current: undefined as unknown as T };
+  let run = hook;
+  function Probe() {
+    result.current = run();
+    return null;
+  }
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  act(() => {
+    renderer = ReactTestRenderer.create(createElement(Probe));
+  });
+  return {
+    result,
+    /** Runs again with a different hook body, as if its inputs changed. */
+    rerender(next: () => T) {
+      run = next;
+      act(() => {
+        renderer.update(createElement(Probe));
+      });
+    },
+    unmount() {
+      act(() => renderer.unmount());
+    },
+  };
+}
+
+/** Lets time pass under fake timers, with React caught up after each step. */
+export async function flush(ms = 0): Promise<void> {
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(ms);
+  });
+}
+
+export const hasSpinner = (root: ReactTestInstance): boolean =>
+  root.findAllByType(ActivityIndicator).length > 0;
+
+/** Types into any text box, found by its accessibility label. */
+export function typeInto(
+  root: ReactTestInstance,
+  label: string,
+  text: string,
+): void {
+  const input = root
+    .findAllByType(TextInput)
+    .find(node => node.props.accessibilityLabel === label);
+  if (!input) {
+    throw new Error(`No text box labeled "${label}"`);
+  }
+  act(() => {
+    input.props.onChangeText(text);
+  });
+}
+
+/** Taps the button whose text is exactly the given text, not just containing it. */
+export function pressExact(root: ReactTestInstance, label: string): void {
+  const button = root
+    .findAll(
+      node =>
+        node.props.accessibilityRole !== 'adjustable' &&
+        typeof node.props.onPress === 'function' &&
+        allText(node).length > 0 &&
+        allText(node).every(text => text === label),
+    )
+    .find(Boolean);
+  if (!button) {
+    throw new Error(`No button with exactly "${label}"`);
+  }
+  act(() => {
+    button.props.onPress();
+  });
+}
+
+/** Taps something that has an accessibility label but no text of its own. */
+export function pressLabeled(root: ReactTestInstance, label: string): void {
+  const target = root
+    .findAll(
+      node =>
+        node.props.accessibilityLabel === label &&
+        typeof node.props.onPress === 'function',
+    )
+    .find(Boolean);
+  if (!target) {
+    throw new Error(`Nothing labeled "${label}"`);
+  }
+  act(() => {
+    target.props.onPress();
   });
 }

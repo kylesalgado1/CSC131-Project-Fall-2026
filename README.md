@@ -29,12 +29,20 @@ Expo Go can't run everything. Remote push notifications and background location 
 
 The app's main screen asks the backend whether to leave now or wait, and shows the answer with both choices, the arrival times, how sure the app is, and any heads-up such as rain.
 
-1. **Start the backend** in one terminal: `cd backend && npm run serve`. It needs `backend/.env` (see Backend below). With `TOMTOM_API_KEY` set it uses live TomTom traffic; without it, PeMS data.
+1. **Start the backend** in one terminal: `cd backend && npm run serve`. It needs `backend/.env` (see Backend below). With `TOMTOM_API_KEY` set it uses live TomTom traffic and place search; without it, PeMS data only and no search.
 2. **Start the app** in another terminal: `npm start`, then scan the QR code with Expo Go. Your phone and computer must be on the same Wi-Fi.
 
 The app finds the backend at the same address Expo loaded it from, on port 3000. If that does not work (a tunnel, or a firewall), give it the address directly: `EXPO_PUBLIC_API_URL=http://YOUR-COMPUTER-IP:3000 npm start`. Your computer may ask to allow incoming connections for Node the first time.
 
-The screen refreshes itself every 5 minutes while open, and says when the advice changes. Real traffic on the demo commute rarely says "wait", so under **Data** you can switch to **Sample: Wait**, **Sample: Leave now** or **Sample: Running late** to see every state. Samples are labeled as made-up data on screen. The trip list and settings are stand-ins for trip setup (Epic 3) and preferences (Epic 6).
+**Choosing a trip.** The card at the top has **From** and **To**. Tap either to search for a place or address (suggestions start at 3 letters), or pick a recent or well-known place. **From** also offers **Use my current location**, the default. The app asks for location permission the first time it needs it, while the app is open, and reads your position once for each answer, so the answer follows you while the app is open. It never tracks you in the background. If the phone cannot say where it is, the screen explains why and offers Settings, a starting address, or another try. The **⇅** button swaps start and destination when both are places. Your last trip and your recent places are remembered on the phone.
+
+**Leave by and Arrive by** sit under the trip card. Tap one and scroll the hour, minute and AM/PM wheels (or tap a value). Leave by is the latest you want to be on the road: the app will not tell you to wait past it. Arrive by is the latest you need to be there: the app never suggests an arrival after it, and says how late you may be if leaving now cannot make it. A time means the next time the clock shows it (tomorrow if it has passed), worked out fresh on every refresh. "Any time" removes a limit.
+
+**Room to spare and far-off deadlines.** With an Arrive by time, the answer also says when you would arrive, how much room that leaves, and the latest you can leave and still make it. When the deadline is more than 3 hours away, the forecast stretches to it (every 30 minutes on the half hour, up to 12 hours) and the answer becomes a departure time, such as "Leave at 7:00 PM": the latest time that arrives with at least 10 minutes to spare (or, with the Least driving goal, the quietest time if it saves enough). The longest-wait setting does not apply to these plans; Leave by still does.
+
+**Preferences** (what matters to you, how long you will wait, how much a wait must save) are folded away under their own heading. The screen refreshes itself every 5 minutes while open, and says when the advice changes.
+
+Real traffic on the demo commute rarely says "wait", so under **Demo options** you can switch to **Sample: Wait**, **Sample: Leave now** or **Sample: Running late** to see every state. Samples are labeled as made-up data on screen. Trip setup and preferences overlap Epics 3 and 6, and were built here as working stand-ins.
 
 ### Run on an emulator
 
@@ -106,6 +114,10 @@ If you change how profiles are built, recompute them from the stored readings wi
 cd backend && npm run rebuild-profiles -- --min-observed 0
 ```
 
+### Location and privacy
+
+A trip that starts at the current location sends the phone's coordinates to our backend in each verdict request, and TomTom receives them as part of the route request. The server does not log requests or coordinates and stores nothing about them. Place search sends the typed text, and a rough position to rank nearby places first, to TomTom through the backend. Location permission is asked for only while the app is open ("when in use"), and the app never reads location in the background.
+
 ### Tests and checks
 
 ```sh
@@ -134,16 +146,19 @@ cd backend && npm run serve    # PORT defaults to 3000
 
 `POST /verdict` takes a trip and returns the stay-or-go verdict plus the 13 departure slots behind it (15-minute steps over 3 hours). `GET /health` reports ok.
 
+`GET /places?q=sac&lat=38.2&lng=-122.0` returns up to 5 places matching text being typed (at least 2 characters), closest to `lat`/`lng` first. Give both `lat` and `lng`, or neither. It uses TomTom's search, so the key stays on the server. It returns 503 `search_unavailable` when TomTom is not set up, and 502 when TomTom fails. Results are kept in memory for 10 minutes and never stored.
+
 ```sh
 curl -X POST localhost:3000/verdict -H 'content-type: application/json' -d '{
   "origin": {"lat": 38.2383, "lng": -122.0402},
   "destination": {"lat": 38.5593, "lng": -121.4237},
   "arriveBy": "2026-10-21T17:00:00Z",
+  "leaveBy": "2026-10-21T16:00:00Z",
   "preferences": {"goal": "balance", "maxWaitMinutes": 90, "minSavingsMinutes": 10}
 }'
 ```
 
-`arriveBy` and `preferences` are optional. `goal` is `minimize_time`, `arrive_by` or `balance` (default). `maxWaitMinutes` is 15 to 180. The server's clock decides "now"; a `now` in the request is ignored. Dates in the response are ISO 8601 UTC strings.
+`arriveBy`, `leaveBy` and `preferences` are optional. `leaveBy` caps how long the answer may tell you to wait; leaving now is always allowed. `verdict.action` is `leave_now`, `wait` or `leave_later`; with a deadline the verdict also carries `deadline` (`arriveBy`, `marginMinutes` and, when it can be found, `latestDeparture`). A deadline more than 3 hours out makes the response carry more slots. `goal` is `minimize_time`, `arrive_by` or `balance` (default). `maxWaitMinutes` is 15 to 180. The server's clock decides "now"; a `now` in the request is ignored. Dates in the response are ISO 8601 UTC strings.
 
 | Status                    | Meaning                                                           |
 | ------------------------- | ----------------------------------------------------------------- |
