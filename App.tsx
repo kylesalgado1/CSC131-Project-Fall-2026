@@ -14,6 +14,7 @@ import {
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 import { defaultBaseUrl } from './src/api/baseUrl';
+import { Attribution } from './src/components/Attribution';
 import { Notice } from './src/components/Notice';
 import { SettingsPanel } from './src/components/SettingsPanel';
 import { useTheme } from './src/components/theme';
@@ -116,6 +117,8 @@ function Screen({ baseUrl = defaultBaseUrl(), fetchFn }: Props) {
           </Pressable>
         </View>
       ) : null}
+
+      {response && source === 'live' ? <Attribution /> : null}
 
       <SettingsPanel
         tripId={tripId}

@@ -152,4 +152,4 @@ curl -X POST localhost:3000/verdict -H 'content-type: application/json' -d '{
 | 502 `routing_unavailable` | The routing service could not plan the trip                       |
 | 500 `internal`            | Unexpected failure (details are logged, not returned)             |
 
-Route paths and traffic come from TomTom, with the public OSRM demo server as a development-only fallback, and rain from Open-Meteo.
+Route paths and traffic come from TomTom, with the public OSRM demo server as a development-only fallback, and rain from Open-Meteo. Open-Meteo's data is CC BY 4.0 and its free service is non-commercial only, so the app credits it under every live answer, with a link and a note that the data is changed. Keep that credit if you move the weather display, and look into a paid plan before any commercial launch.

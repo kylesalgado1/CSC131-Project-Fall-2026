@@ -1,10 +1,11 @@
 import React from 'react';
+import { Linking } from 'react-native';
 import ReactTestRenderer, { act } from 'react-test-renderer';
 import App from '../App';
 import { VerdictResponse } from '../src/api/types';
 import { sampleResponse } from '../src/samples';
 import { DEMO_TRIPS } from '../src/trips';
-import { allText, hasText, press, typeArriveBy } from '../src/testing';
+import { allText, hasText, press, tapLink, typeArriveBy } from '../src/testing';
 
 // Without native code to report the screen's insets, the real provider
 // renders nothing.
@@ -166,6 +167,52 @@ describe('App', () => {
     }
     await flush(600);
     expect(fetchFn).toHaveBeenCalledTimes(2); // the first load and one for the typing
+  });
+
+  describe('weather credit', () => {
+    it('credits Open-Meteo under a live answer, saying the data was changed', async () => {
+      const root = await open(server(sampleResponse('leave_now', START)));
+      expect(hasText(root, 'Weather data by Open-Meteo.com')).toBe(true);
+      expect(hasText(root, 'CC BY 4.0')).toBe(true);
+      expect(hasText(root, 'Changed: rain forecasts')).toBe(true);
+    });
+
+    it('does not credit it before there is an answer, or on made-up samples', async () => {
+      const root = await open(server(new TypeError('offline')));
+      expect(hasText(root, 'Open-Meteo')).toBe(false);
+      press(root, 'Sample: Wait');
+      await flush(600);
+      expect(hasText(root, 'Open-Meteo')).toBe(false);
+    });
+
+    it('links to Open-Meteo and to the license', async () => {
+      const opened = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+      try {
+        const root = await open(server(sampleResponse('leave_now', START)));
+        tapLink(root, 'Weather data by Open-Meteo.com');
+        tapLink(root, 'CC BY 4.0');
+        expect(opened.mock.calls.map(c => c[0])).toEqual([
+          'https://open-meteo.com/',
+          'https://creativecommons.org/licenses/by/4.0/',
+        ]);
+      } finally {
+        opened.mockRestore();
+      }
+    });
+
+    it('survives a link that cannot be opened', async () => {
+      const opened = jest
+        .spyOn(Linking, 'openURL')
+        .mockRejectedValue(new Error('no app to open this'));
+      try {
+        const root = await open(server(sampleResponse('leave_now', START)));
+        tapLink(root, 'Open-Meteo.com');
+        await flush();
+        expect(allText(root)).toContain('Leave now');
+      } finally {
+        opened.mockRestore();
+      }
+    });
   });
 
   describe('keeping the answer fresh', () => {
