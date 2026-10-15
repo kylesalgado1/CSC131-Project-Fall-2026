@@ -60,7 +60,7 @@ export const bucketOf = (minuteOfDay: number): number =>
   Math.floor(minuteOfDay / BUCKET_MINUTES);
 
 /** 0 = Sunday ... 6 = Saturday */
-const weekdayOf = ({ year, month, day }: CivilDate): number =>
+export const weekdayOf = ({ year, month, day }: CivilDate): number =>
   new Date(Date.UTC(year, month - 1, day)).getUTCDay();
 
 /** Day of month of the nth (1-based) given weekday in a month. */
@@ -179,4 +179,60 @@ export function dayTypeOf(
   }
   const weekday = weekdayOf(date);
   return weekday === 0 || weekday === 6 ? 'weekend' : 'weekday';
+}
+
+/** The civil date n days after (or before, if negative) the given one. */
+export function addDays(date: CivilDate, days: number): CivilDate {
+  const d = new Date(Date.UTC(date.year, date.month - 1, date.day + days));
+  return {
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
+  };
+}
+
+const MINUTE_MS = 60_000;
+
+/** A civil date and minute of day read as if it were UTC, in milliseconds. */
+const asUtcMs = (date: CivilDate, minuteOfDay: number): number =>
+  Date.UTC(date.year, date.month - 1, date.day) + minuteOfDay * MINUTE_MS;
+
+/**
+ * The instant at which the local clock in `timeZone` reads the given date and
+ * minute. Handles daylight saving: 07:00 in October is not 07:00 in November.
+ */
+export function instantAt(
+  date: CivilDate,
+  minuteOfDay: number,
+  timeZone: string = LOCAL_TIME_ZONE,
+): Date {
+  const wanted = asUtcMs(date, minuteOfDay);
+  let guess = wanted;
+  // Two passes settle it, since the offset only changes by an hour at most.
+  for (let i = 0; i < 2; i++) {
+    const shown = localTime(new Date(guess), timeZone);
+    guess -= asUtcMs(shown.date, shown.minuteOfDay) - wanted;
+  }
+  return new Date(guess);
+}
+
+/** An ISO 8601 string on the local clock with its UTC offset, e.g. ...-07:00. */
+export function formatWithOffset(
+  at: Date,
+  timeZone: string = LOCAL_TIME_ZONE,
+): string {
+  const shown = localTime(at, timeZone);
+  const minuteStart = Math.floor(at.getTime() / MINUTE_MS) * MINUTE_MS;
+  const offsetMinutes = Math.round(
+    (asUtcMs(shown.date, shown.minuteOfDay) - minuteStart) / MINUTE_MS,
+  );
+  const sign = offsetMinutes < 0 ? '-' : '+';
+  const abs = Math.abs(offsetMinutes);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const clock = `${pad(Math.floor(shown.minuteOfDay / 60))}:${pad(
+    shown.minuteOfDay % 60,
+  )}:00`;
+  return `${toIso(shown.date)}T${clock}${sign}${pad(
+    Math.floor(abs / 60),
+  )}:${pad(abs % 60)}`;
 }
