@@ -16,20 +16,12 @@ import { importPemsFile } from '../db/importPems';
 import { runMigrations } from '../db/migrate';
 import { rebuildProfiles, upsertStations } from '../db/pemsRepository';
 import { databaseFromEnv } from '../db/pool';
-import { CampusBreak } from '../prediction/calendar';
 import {
   inCorridor,
   parseStationMetadata,
   SUISUN_TO_SAC_STATE,
 } from '../prediction/providers/pems/metadata';
-
-function parseBreak(spec: string): CampusBreak {
-  const [name, start, end] = spec.split(',').map(s => s.trim());
-  if (!name || !start || !end) {
-    throw new Error(`--break must be "name,start,end", got: ${spec}`);
-  }
-  return { name, start, end };
-}
+import { parseCampusBreak } from './campusBreak';
 
 async function main() {
   const { values } = parseArgs({
@@ -71,7 +63,7 @@ async function main() {
     const profiles = await rebuildProfiles(db, {
       stationIds: [...ids],
       minPctObserved: Number(values['min-observed']),
-      campusBreaks: (values.break ?? []).map(parseBreak),
+      campusBreaks: (values.break ?? []).map(parseCampusBreak),
     });
     console.log(`Rebuilt ${profiles} baseline profile rows`);
   } finally {

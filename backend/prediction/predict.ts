@@ -1,126 +1,89 @@
+import { addMinutes } from '../util/time';
+import { assessConfidence } from './confidence';
 import { BaselineProvider } from './providers/baseline';
-import { LiveConditionsProvider } from './providers/live';
+import { liveUnavailable, LiveConditionsProvider } from './providers/live';
 import {
-  Confidence,
-  LiveAdjustment,
-  SlotPrediction,
-  TripRequest,
-} from './types';
+  HourlyWeather,
+  rainDelayFactor,
+  WeatherProvider,
+  weatherAt,
+} from './providers/weather';
+import { LatLng, Route, SlotPrediction, TripRequest } from './types';
 
 export const SLOT_INTERVAL_MINUTES = 15;
 export const HORIZON_MINUTES = 180;
+/** Forecast hours to fetch: the horizon plus time to drive. */
+const WEATHER_HOURS = 6;
 /** Live congestion fades to zero this many minutes after "now". */
 export const LIVE_DECAY_MINUTES = 60;
-/** Fewer observations than this and the baseline is not trusted. */
-export const MIN_SAMPLES = 20;
-export const HIGH_CONFIDENCE_SAMPLES = 50;
-/** Below this share of measured history, confidence is Low. */
-export const LOW_OBSERVED_SHARE = 0.25;
-/** Below this share, confidence is at most Medium. */
-export const MEDIUM_OBSERVED_SHARE = 0.5;
+
+/** Minutes after "now" of each departure slot, slot 0 being "leave now". */
+const SLOT_OFFSETS = Array.from(
+  { length: HORIZON_MINUTES / SLOT_INTERVAL_MINUTES + 1 },
+  (_, i) => i * SLOT_INTERVAL_MINUTES,
+);
 
 export interface PredictionProviders {
   baseline: BaselineProvider;
   live: LiveConditionsProvider;
+  /** Optional. Without it, or when it fails, rain is not accounted for. */
+  weather?: WeatherProvider;
 }
 
-export function addMinutes(date: Date, minutes: number): Date {
-  return new Date(date.getTime() + minutes * 60_000);
-}
+const midpointOf = ({ origin, destination }: Route): LatLng => ({
+  lat: (origin.lat + destination.lat) / 2,
+  lng: (origin.lng + destination.lng) / 2,
+});
 
 /**
- * Predicts drive time for every departure slot from now through the horizon,
- * slot 0 being "leave now". Live congestion is added on top of the baseline
- * and fades out linearly, since a current slowdown says little about traffic
- * an hour from now. A live feed that fails is treated as unavailable and the
- * baseline is used alone.
+ * Predicts drive time for every departure slot from now through the horizon.
+ * Live congestion is added on top of the baseline and fades out linearly,
+ * since a current slowdown says little about traffic an hour from now. Rain
+ * lengthens the baseline for the hours it falls in. A live feed or forecast
+ * that fails is treated as unavailable; the baseline must succeed.
  */
 export async function predictSlots(
   request: TripRequest,
-  providers: PredictionProviders,
+  { baseline, live: liveSource, weather }: PredictionProviders,
 ): Promise<SlotPrediction[]> {
   const { route, now } = request;
-  const live = await providers.live
-    .getAdjustment(route, now)
-    .catch<LiveAdjustment>(() => ({
-      available: false,
-      extraMinutes: 0,
-      incidents: [],
-    }));
+  const departures = SLOT_OFFSETS.map(offset => addMinutes(now, offset));
 
-  const offsets: number[] = [];
-  for (let m = 0; m <= HORIZON_MINUTES; m += SLOT_INTERVAL_MINUTES) {
-    offsets.push(m);
-  }
+  // The three sources are independent, so ask for them at the same time.
+  const [live, forecast, bases] = await Promise.all([
+    liveSource.getAdjustment(route, now).catch(liveUnavailable),
+    weather
+      ? weather
+          .getHourly(midpointOf(route), now, WEATHER_HOURS)
+          .catch((): HourlyWeather[] => [])
+      : [],
+    baseline.getBaselines
+      ? baseline.getBaselines(route, departures)
+      : Promise.all(departures.map(at => baseline.getBaseline(route, at))),
+  ]);
 
-  return Promise.all(
-    offsets.map(async offset => {
-      const departAt = addMinutes(now, offset);
-      const base = await providers.baseline.getBaseline(route, departAt);
-      const fade = Math.max(0, 1 - offset / LIVE_DECAY_MINUTES);
-      const driveMinutes = Math.max(
-        1,
-        Math.round(base.minutes + live.extraMinutes * fade),
-      );
-      const { confidence, reason } = assessConfidence(
-        base.sampleCount,
-        base.observedShare,
-        live,
-      );
-      return {
-        departAt,
-        driveMinutes,
-        arriveAt: addMinutes(departAt, driveMinutes),
-        confidence,
-        confidenceReason: reason,
-      };
-    }),
-  );
-}
-
-function assessConfidence(
-  sampleCount: number,
-  observedShare: number | undefined,
-  live: LiveAdjustment,
-): { confidence: Confidence; reason: string } {
-  if (live.incidents.length > 0) {
+  return departures.map((departAt, i) => {
+    const base = bases[i];
+    const liveFade = Math.max(0, 1 - SLOT_OFFSETS[i] / LIVE_DECAY_MINUTES);
+    const weatherFactor = rainDelayFactor(
+      weatherAt(forecast, departAt)?.precipitationMm ?? 0,
+    );
+    const driveMinutes = Math.max(
+      1,
+      Math.round(base.minutes * weatherFactor + live.extraMinutes * liveFade),
+    );
+    const { confidence, reason } = assessConfidence(
+      base.sampleCount,
+      base.observedShare,
+      live,
+    );
     return {
-      confidence: 'Low',
-      reason: 'An incident on your route could change this estimate.',
+      departAt,
+      driveMinutes,
+      arriveAt: addMinutes(departAt, driveMinutes),
+      confidence,
+      confidenceReason: reason,
+      weatherFactor,
     };
-  }
-  if (sampleCount < MIN_SAMPLES) {
-    return {
-      confidence: 'Low',
-      reason: 'There is little historical data for this route.',
-    };
-  }
-  if (observedShare !== undefined && observedShare < LOW_OBSERVED_SHARE) {
-    return {
-      confidence: 'Low',
-      reason: 'Most of the history for this route is estimated, not measured.',
-    };
-  }
-  if (observedShare !== undefined && observedShare < MEDIUM_OBSERVED_SHARE) {
-    return {
-      confidence: 'Medium',
-      reason: 'Part of the history for this route is estimated, not measured.',
-    };
-  }
-  if (!live.available) {
-    return {
-      confidence: 'Medium',
-      reason: 'Live traffic is unavailable, so this uses typical conditions.',
-    };
-  }
-  if (sampleCount < HIGH_CONFIDENCE_SAMPLES) {
-    return {
-      confidence: 'Medium',
-      reason: 'This route has a limited amount of historical data.',
-    };
-  }
-  return {
-    confidence: 'High',
-    reason: 'Based on plenty of historical data and live traffic.',
-  };
+  });
 }

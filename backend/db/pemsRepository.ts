@@ -138,9 +138,9 @@ async function insertProfiles(
   await db.query(
     `INSERT INTO baseline_profiles
             (station_id, day_type, bucket, avg_speed_mph, sample_count,
-             observed_share)
+             observed_share, free_flow_mph)
      SELECT * FROM unnest($1::int[], $2::text[], $3::smallint[], $4::real[],
-                          $5::int[], $6::real[])`,
+                          $5::int[], $6::real[], $7::real[])`,
     [
       profiles.map(p => p.stationId),
       profiles.map(p => p.dayType),
@@ -148,6 +148,7 @@ async function insertProfiles(
       profiles.map(p => p.avgSpeedMph),
       profiles.map(p => p.sampleCount),
       profiles.map(p => p.observedShare),
+      profiles.map(p => p.freeFlowMph ?? 0),
     ],
   );
 }

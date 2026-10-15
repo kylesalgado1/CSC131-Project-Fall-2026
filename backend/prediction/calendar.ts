@@ -80,8 +80,10 @@ function lastWeekday(year: number, month: number, weekday: number): number {
   return lastDay - ((last - weekday + 7) % 7);
 }
 
+const SUNDAY = 0;
 const MON = 1;
 const THU = 4;
+const SATURDAY = 6;
 
 /** Fixed-date holidays: [month, day, name]. */
 const FIXED: Array<[number, number, string]> = [
@@ -95,7 +97,13 @@ const FIXED: Array<[number, number, string]> = [
 
 /** The day a fixed-date holiday is observed: Saturday -> Friday, Sunday -> Monday. */
 function observed(date: CivilDate): CivilDate {
-  const shift = { 6: -1, 0: 1 }[weekdayOf(date) as 6 | 0] ?? 0;
+  const weekday = weekdayOf(date);
+  let shift = 0;
+  if (weekday === SATURDAY) {
+    shift = -1;
+  } else if (weekday === SUNDAY) {
+    shift = 1;
+  }
   const d = new Date(Date.UTC(date.year, date.month - 1, date.day + shift));
   return {
     year: d.getUTCFullYear(),

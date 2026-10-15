@@ -60,6 +60,8 @@ export interface SlotPrediction {
   arriveAt: Date;
   confidence: Confidence;
   confidenceReason: string;
+  /** Multiplier applied for rain; 1 or absent means none. */
+  weatherFactor?: number;
 }
 
 export interface DepartureOption {
@@ -85,6 +87,8 @@ export interface Verdict {
   lateByMinutes?: number;
   confidence: Confidence;
   confidenceReason: string;
+  /** Heads-up messages, such as a holiday or rain, for display. */
+  notes: string[];
   generatedAt: Date;
 }
 

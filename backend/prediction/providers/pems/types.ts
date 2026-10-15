@@ -1,4 +1,5 @@
 import { DayType } from '../../calendar';
+import { Route } from '../../types';
 
 /** One 5-minute station reading, already on the local clock. */
 export interface PemsObservation {
@@ -26,6 +27,11 @@ export interface ProfileRow {
    * filled in by PeMS from neighboring stations and history.
    */
   observedShare: number;
+  /**
+   * How fast traffic moves at this station on an empty road, in mph. Absent
+   * when the station has no usable overnight readings.
+   */
+  freeFlowMph?: number;
 }
 
 /** A mainline detector station from the PeMS metadata files. */
@@ -39,4 +45,30 @@ export interface PemsStation {
   lengthMiles: number;
   latitude: number;
   longitude: number;
+}
+
+/** A stretch of road covered by one PeMS station. */
+export interface RouteSegment {
+  stationId: number;
+  lengthMiles: number;
+}
+
+export interface ResolvedRoute {
+  /** Stations along the route, in driving order. */
+  segments: RouteSegment[];
+  /** Route length with no station: ramps, surface streets, gaps. */
+  uncoveredMiles: number;
+  /**
+   * The routing service's travel time for the whole route with no traffic.
+   * When known, baselines add PeMS delay to it instead of summing PeMS speeds.
+   */
+  freeFlowMinutes?: number;
+}
+
+/**
+ * Maps a trip to the PeMS stations it passes, in order. This needs route
+ * geometry (from a routing service) matched to station locations.
+ */
+export interface RouteResolver {
+  resolve(route: Route): Promise<ResolvedRoute>;
 }

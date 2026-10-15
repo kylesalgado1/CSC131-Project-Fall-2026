@@ -1,4 +1,3 @@
-import { BaselineProvider } from '../baseline';
 import {
   bucketOf,
   CampusBreak,
@@ -6,23 +5,13 @@ import {
   localTime,
   LOCAL_TIME_ZONE,
 } from '../../calendar';
-import { MIN_SAMPLES } from '../../predict';
+import { MIN_SAMPLES } from '../../confidence';
 import { BaselineResult, Route } from '../../types';
-import { ProfileStore } from './store';
+import { BaselineProvider } from '../baseline';
+import { ProfileKey, ProfileStore } from './store';
+import { ProfileRow, ResolvedRoute, RouteResolver } from './types';
 
-/** A stretch of road covered by one PeMS station. */
-export interface RouteSegment {
-  stationId: number;
-  lengthMiles: number;
-}
-
-/**
- * Maps a trip to the PeMS stations it passes, in order. This needs route
- * geometry (from a routing service) matched to station locations.
- */
-export interface RouteResolver {
-  resolve(route: Route): Promise<RouteSegment[]>;
-}
+export type { ResolvedRoute, RouteResolver, RouteSegment } from './types';
 
 /** Thrown when PeMS has no usable data for the route, e.g. surface streets. */
 export class NoBaselineCoverageError extends Error {
@@ -38,13 +27,31 @@ export interface PemsBaselineOptions {
   /** Speeds are clamped to this range so one bad reading cannot dominate. */
   minSpeedMph?: number;
   maxSpeedMph?: number;
+  /** Assumed speed over route length that has no station. */
+  uncoveredSpeedMph?: number;
 }
+
+type StationProfiles = Map<number, ProfileRow>;
 
 const median = (values: number[]): number => {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 };
+
+const keyId = (k: ProfileKey) => `${k.dayType}|${k.bucket}`;
+
+/** Groups profile rows by day type and bucket, then by station. */
+function indexProfiles(rows: ProfileRow[]): Map<string, StationProfiles> {
+  const index = new Map<string, StationProfiles>();
+  for (const row of rows) {
+    const key = keyId(row);
+    const stations = index.get(key) ?? new Map();
+    stations.set(row.stationId, row);
+    index.set(key, stations);
+  }
+  return index;
+}
 
 /**
  * Baseline drive time from historical PeMS speeds: for each station on the
@@ -58,53 +65,94 @@ export class PemsBaselineProvider implements BaselineProvider {
   ) {}
 
   async getBaseline(route: Route, departAt: Date): Promise<BaselineResult> {
-    const {
-      campusBreaks = [],
-      timeZone = LOCAL_TIME_ZONE,
-      minSpeedMph = 5,
-      maxSpeedMph = 80,
-    } = this.options;
+    return (await this.getBaselines(route, [departAt]))[0];
+  }
 
-    const segments = await this.resolver.resolve(route);
-    if (segments.length === 0) {
+  /**
+   * Resolves the route once and reads all the needed profiles in a single
+   * query, however many departure times are asked for.
+   */
+  async getBaselines(
+    route: Route,
+    departAts: Date[],
+  ): Promise<BaselineResult[]> {
+    const { campusBreaks = [], timeZone = LOCAL_TIME_ZONE } = this.options;
+
+    const resolved = await this.resolver.resolve(route);
+    if (resolved.segments.length === 0) {
       throw new NoBaselineCoverageError();
     }
+    const stationIds = resolved.segments.map(s => s.stationId);
 
-    const { date, minuteOfDay } = localTime(departAt, timeZone);
-    const bucket = bucketOf(minuteOfDay);
-    const ids = segments.map(s => s.stationId);
-    const dayType = dayTypeOf(date, campusBreaks);
+    const keys = departAts.map<ProfileKey>(at => {
+      const { date, minuteOfDay } = localTime(at, timeZone);
+      return {
+        dayType: dayTypeOf(date, campusBreaks),
+        bucket: bucketOf(minuteOfDay),
+      };
+    });
+    const { profiles, estimatedFromWeekends } = await this.loadProfiles(
+      stationIds,
+      keys,
+    );
 
-    let rows = await this.store.getProfiles(ids, dayType, bucket);
-    let usedFallback = false;
-    if (dayType === 'holiday' && rows.length === 0) {
-      rows = await this.store.getProfiles(ids, 'weekend', bucket);
-      usedFallback = true;
-    }
+    return keys.map(key => {
+      const id = keyId(key);
+      return this.combine(
+        resolved,
+        profiles.get(id) ?? new Map(),
+        estimatedFromWeekends.has(id),
+      );
+    });
+  }
 
-    const byStation = new Map(rows.map(r => [r.stationId, r]));
-    const clamp = (mph: number) =>
-      Math.min(maxSpeedMph, Math.max(minSpeedMph, mph));
+  /**
+   * Reads the profiles for every distinct key in one query. A holiday with
+   * no history of its own is estimated from the same time on weekends.
+   */
+  private async loadProfiles(stationIds: number[], keys: ProfileKey[]) {
+    const distinct = [...new Map(keys.map(k => [keyId(k), k])).values()];
+    const profiles = indexProfiles(
+      await this.store.getProfiles(stationIds, distinct),
+    );
 
-    let knownMiles = 0;
-    let knownHours = 0;
-    for (const s of segments) {
-      const row = byStation.get(s.stationId);
-      if (row) {
-        knownMiles += s.lengthMiles;
-        knownHours += s.lengthMiles / clamp(row.avgSpeedMph);
+    const estimatedFromWeekends = new Set<string>();
+    const holidaysWithoutData = distinct.filter(
+      k => k.dayType === 'holiday' && !profiles.has(keyId(k)),
+    );
+    if (holidaysWithoutData.length > 0) {
+      const weekend = await this.store.getProfiles(
+        stationIds,
+        holidaysWithoutData.map(k => ({ ...k, dayType: 'weekend' as const })),
+      );
+      const asHoliday = weekend.map(r => ({
+        ...r,
+        dayType: 'holiday' as const,
+      }));
+      for (const [key, stations] of indexProfiles(asHoliday)) {
+        profiles.set(key, stations);
+        estimatedFromWeekends.add(key);
       }
     }
-    if (knownMiles === 0) {
-      throw new NoBaselineCoverageError('No PeMS data for this time of day');
-    }
-    // Stations with no data take the typical speed of the ones that do.
-    const fillSpeed = knownMiles / knownHours;
+    return { profiles, estimatedFromWeekends };
+  }
 
-    let hours = 0;
-    for (const s of segments) {
-      const row = byStation.get(s.stationId);
-      hours += s.lengthMiles / (row ? clamp(row.avgSpeedMph) : fillSpeed);
+  private combine(
+    resolved: ResolvedRoute,
+    byStation: StationProfiles,
+    estimatedFromWeekends: boolean,
+  ): BaselineResult {
+    const { segments, uncoveredMiles } = resolved;
+    const limits = {
+      minSpeedMph: this.options.minSpeedMph ?? 5,
+      maxSpeedMph: this.options.maxSpeedMph ?? 80,
+      uncoveredSpeedMph: this.options.uncoveredSpeedMph ?? 25,
+    };
+    const minutes =
+      freeFlowPlusDelayMinutes(resolved, byStation, limits) ??
+      sumOfSpeedsMinutes(resolved, byStation, limits);
+    if (minutes === undefined) {
+      throw new NoBaselineCoverageError('No PeMS data for this time of day');
     }
 
     // The median keeps one sparse station from sinking confidence for a long
@@ -112,14 +160,14 @@ export class PemsBaselineProvider implements BaselineProvider {
     let sampleCount = median(
       segments.map(s => byStation.get(s.stationId)?.sampleCount ?? 0),
     );
-    if (usedFallback) {
+    if (estimatedFromWeekends) {
       // Holiday traffic estimated from weekends is a guess, so never trust it.
       sampleCount = Math.min(sampleCount, MIN_SAMPLES - 1);
     }
 
     // How much of the route's length rests on measured readings. A station
-    // with no data counts as fully estimated.
-    const totalMiles = segments.reduce((sum, s) => sum + s.lengthMiles, 0);
+    // with no data, and any length without a station, counts as estimated.
+    const coveredMiles = segments.reduce((sum, s) => sum + s.lengthMiles, 0);
     const measuredMiles = segments.reduce(
       (sum, s) =>
         sum + s.lengthMiles * (byStation.get(s.stationId)?.observedShare ?? 0),
@@ -127,9 +175,99 @@ export class PemsBaselineProvider implements BaselineProvider {
     );
 
     return {
-      minutes: hours * 60,
+      minutes,
       sampleCount,
-      observedShare: measuredMiles / totalMiles,
+      observedShare: measuredMiles / (coveredMiles + uncoveredMiles),
     };
   }
+}
+
+interface SpeedLimits {
+  /** Speeds are clamped to this range so one bad reading cannot dominate. */
+  minSpeedMph: number;
+  maxSpeedMph: number;
+  /** Assumed speed over route length that has no station. */
+  uncoveredSpeedMph: number;
+}
+
+const clampSpeed = (mph: number, { minSpeedMph, maxSpeedMph }: SpeedLimits) =>
+  Math.min(maxSpeedMph, Math.max(minSpeedMph, mph));
+
+/**
+ * The routing service's no-traffic time for the route, plus the delay PeMS
+ * shows beyond each station's free-flow speed. The routing service already
+ * knows about signals, ramps and surface streets, so PeMS only has to say how
+ * much slower than usual traffic is. Stations with no data take the average
+ * delay per mile of the ones that have it. Undefined when the routing time or
+ * the free-flow speeds are not known.
+ */
+function freeFlowPlusDelayMinutes(
+  { segments, freeFlowMinutes }: ResolvedRoute,
+  byStation: StationProfiles,
+  limits: SpeedLimits,
+): number | undefined {
+  if (freeFlowMinutes === undefined) {
+    return undefined;
+  }
+  let knownMiles = 0;
+  let knownDelayHours = 0;
+  const delays = segments.map(({ stationId, lengthMiles }) => {
+    const row = byStation.get(stationId);
+    if (!row?.freeFlowMph) {
+      return undefined;
+    }
+    const hours =
+      lengthMiles / clampSpeed(row.avgSpeedMph, limits) -
+      lengthMiles / clampSpeed(row.freeFlowMph, limits);
+    knownMiles += lengthMiles;
+    knownDelayHours += Math.max(0, hours);
+    return Math.max(0, hours);
+  });
+  if (knownMiles === 0) {
+    return undefined;
+  }
+  const delayHoursPerMile = knownDelayHours / knownMiles;
+  const delayHours = delays.reduce(
+    (sum: number, delay, i) =>
+      sum + (delay ?? segments[i].lengthMiles * delayHoursPerMile),
+    0,
+  );
+  return freeFlowMinutes + delayHours * 60;
+}
+
+/**
+ * Drive time from PeMS speeds alone: each station's length over its speed,
+ * plus the road with no station at an assumed surface speed. The fallback for
+ * when there is no routing time. Stations with no data take the typical speed
+ * of the ones that have it. Undefined when no station has data.
+ */
+function sumOfSpeedsMinutes(
+  { segments, uncoveredMiles }: ResolvedRoute,
+  byStation: StationProfiles,
+  limits: SpeedLimits,
+): number | undefined {
+  const speedAt = (stationId: number): number | undefined => {
+    const row = byStation.get(stationId);
+    return row && clampSpeed(row.avgSpeedMph, limits);
+  };
+
+  let knownMiles = 0;
+  let knownHours = 0;
+  for (const { stationId, lengthMiles } of segments) {
+    const speed = speedAt(stationId);
+    if (speed !== undefined) {
+      knownMiles += lengthMiles;
+      knownHours += lengthMiles / speed;
+    }
+  }
+  if (knownMiles === 0) {
+    return undefined;
+  }
+  const fillSpeed = knownMiles / knownHours;
+
+  let hours = uncoveredMiles / limits.uncoveredSpeedMph;
+  for (const { stationId, lengthMiles } of segments) {
+    hours += lengthMiles / (speedAt(stationId) ?? fillSpeed);
+  }
+  return hours * 60;
 }

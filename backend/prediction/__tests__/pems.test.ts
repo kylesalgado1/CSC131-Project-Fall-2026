@@ -128,6 +128,24 @@ describe('aggregateProfiles', () => {
     expect(rows[0].avgSpeedMph).toBeCloseTo(60);
   });
 
+  it('takes free-flow speed from the overnight readings only', () => {
+    const rows = aggregateProfiles([
+      obs({ minuteOfDay: 2 * 60, avgSpeedMph: 70 }),
+      obs({ minuteOfDay: 3 * 60, avgSpeedMph: 68 }),
+      obs({ minuteOfDay: 4 * 60 + 55, avgSpeedMph: 66 }),
+      obs({ minuteOfDay: 5 * 60, avgSpeedMph: 20 }), // 05:00 is not overnight
+      obs({ minuteOfDay: 8 * 60, avgSpeedMph: 30 }),
+    ]);
+    expect(rows).toHaveLength(5);
+    for (const row of rows) {
+      expect(row.freeFlowMph).toBe(68);
+    }
+  });
+
+  it('has no free-flow speed without overnight readings', () => {
+    expect(aggregateProfiles([obs()])[0].freeFlowMph).toBeUndefined();
+  });
+
   it('reports what share of readings were measured', () => {
     const rows = aggregateProfiles(
       [
@@ -191,10 +209,13 @@ describe('PemsBaselineProvider', () => {
   // Wednesday 08:00 Pacific daylight time.
   const MORNING = new Date('2026-10-14T15:00:00Z');
   const resolver: RouteResolver = {
-    resolve: async () => [
-      { stationId: 101, lengthMiles: 2 },
-      { stationId: 102, lengthMiles: 3 },
-    ],
+    resolve: async () => ({
+      segments: [
+        { stationId: 101, lengthMiles: 2 },
+        { stationId: 102, lengthMiles: 3 },
+      ],
+      uncoveredMiles: 0,
+    }),
   };
   const row = (over: Partial<ProfileRow>): ProfileRow => ({
     stationId: 101,
@@ -255,6 +276,136 @@ describe('PemsBaselineProvider', () => {
     expect(result.observedShare).toBeCloseTo(0.4);
   });
 
+  it('adds time for road with no station, at the surface speed', async () => {
+    const withGap: RouteResolver = {
+      resolve: async () => ({
+        segments: [{ stationId: 101, lengthMiles: 5 }],
+        uncoveredMiles: 5,
+      }),
+    };
+    const provider = providerFor(
+      [row({ stationId: 101, avgSpeedMph: 60 })],
+      withGap,
+    );
+    const result = await provider.getBaseline(ROUTE, MORNING);
+    // 5 miles at 60 mph = 5 min, plus 5 miles at the 25 mph default = 12 min.
+    expect(result.minutes).toBeCloseTo(17);
+    // Only half the route's length rests on measured data.
+    expect(result.observedShare).toBeCloseTo(0.5);
+  });
+
+  it('resolves the route once and reads the data once for many times', async () => {
+    let resolves = 0;
+    const counting: RouteResolver = {
+      resolve: async r => {
+        resolves += 1;
+        return resolver.resolve(r);
+      },
+    };
+    const reads: number[] = [];
+    const store = new InMemoryProfileStore([
+      row({ stationId: 101, bucket: 32 }),
+      row({ stationId: 101, bucket: 33, avgSpeedMph: 30 }),
+      row({ stationId: 102, bucket: 32 }),
+      row({ stationId: 102, bucket: 33, avgSpeedMph: 30 }),
+    ]);
+    const original = store.getProfiles.bind(store);
+    store.getProfiles = async (ids, keys) => {
+      reads.push(keys.length);
+      return original(ids, keys);
+    };
+    const provider = new PemsBaselineProvider(store, counting);
+    const results = await provider.getBaselines(ROUTE, [
+      MORNING,
+      new Date(MORNING.getTime() + 15 * 60_000),
+      MORNING,
+    ]);
+    expect(resolves).toBe(1);
+    expect(reads).toEqual([2]); // two distinct buckets, one query
+    expect(results[0].minutes).toBeCloseTo(5);
+    expect(results[1].minutes).toBeCloseTo(10);
+    expect(results[2].minutes).toBeCloseTo(5);
+  });
+
+  describe("with the routing service's free-flow time", () => {
+    const withFreeFlow = (
+      freeFlowMinutes: number | undefined,
+      segments = [
+        { stationId: 101, lengthMiles: 2 },
+        { stationId: 102, lengthMiles: 3 },
+      ],
+      uncoveredMiles = 0,
+    ): RouteResolver => ({
+      resolve: async () => ({ segments, uncoveredMiles, freeFlowMinutes }),
+    });
+    const at = (rows: ProfileRow[], custom: RouteResolver) =>
+      providerFor(rows, custom).getBaseline(ROUTE, MORNING);
+
+    it('adds the delay beyond free-flow to the routing time', async () => {
+      // 5 miles at 30 mph is 10 min; at 60 mph it is 5 min: 5 min of delay.
+      const result = await at(
+        [
+          row({ stationId: 101, avgSpeedMph: 30, freeFlowMph: 60 }),
+          row({ stationId: 102, avgSpeedMph: 30, freeFlowMph: 60 }),
+        ],
+        withFreeFlow(65),
+      );
+      expect(result.minutes).toBeCloseTo(70);
+    });
+
+    it('adds nothing when traffic moves at or above free-flow', async () => {
+      const result = await at(
+        [
+          row({ stationId: 101, avgSpeedMph: 70, freeFlowMph: 60 }),
+          row({ stationId: 102, avgSpeedMph: 60, freeFlowMph: 60 }),
+        ],
+        withFreeFlow(65),
+      );
+      expect(result.minutes).toBeCloseTo(65);
+    });
+
+    it('gives a station with no data the average delay per mile', async () => {
+      // Station 101: 2 miles, 2 min of delay (1 min per mile). Station 102
+      // has no profile, so its 3 miles get 3 min.
+      const result = await at(
+        [row({ stationId: 101, avgSpeedMph: 30, freeFlowMph: 60 })],
+        withFreeFlow(60),
+      );
+      // 2 miles: 4 min at 30 mph vs 2 min at 60 mph = 2 min delay.
+      expect(result.minutes).toBeCloseTo(60 + 2 + 3);
+    });
+
+    it('does not double count road with no station', async () => {
+      // The routing time already covers the uncovered miles.
+      const result = await at(
+        [row({ stationId: 101, avgSpeedMph: 60, freeFlowMph: 60 })],
+        withFreeFlow(60, [{ stationId: 101, lengthMiles: 5 }], 10),
+      );
+      expect(result.minutes).toBeCloseTo(60);
+      // But they still count as unmeasured.
+      expect(result.observedShare).toBeCloseTo(5 / 15);
+    });
+
+    it('falls back to summing PeMS speeds without a routing time', async () => {
+      const result = await at(
+        [
+          row({ stationId: 101, avgSpeedMph: 60, freeFlowMph: 60 }),
+          row({ stationId: 102, avgSpeedMph: 60, freeFlowMph: 60 }),
+        ],
+        withFreeFlow(undefined),
+      );
+      expect(result.minutes).toBeCloseTo(5);
+    });
+
+    it('falls back to summing speeds when free-flow speeds are unknown', async () => {
+      const result = await at(
+        [row({ stationId: 101 }), row({ stationId: 102 })], // no freeFlowMph
+        withFreeFlow(65),
+      );
+      expect(result.minutes).toBeCloseTo(5);
+    });
+  });
+
   it('clamps unrealistic speeds', async () => {
     const result = await providerFor([
       row({ stationId: 101, avgSpeedMph: 0.5 }),
@@ -265,7 +416,9 @@ describe('PemsBaselineProvider', () => {
   });
 
   it('throws when the route has no stations', async () => {
-    const empty: RouteResolver = { resolve: async () => [] };
+    const empty: RouteResolver = {
+      resolve: async () => ({ segments: [], uncoveredMiles: 5 }),
+    };
     await expect(
       providerFor([row({})], empty).getBaseline(ROUTE, MORNING),
     ).rejects.toThrow(NoBaselineCoverageError);

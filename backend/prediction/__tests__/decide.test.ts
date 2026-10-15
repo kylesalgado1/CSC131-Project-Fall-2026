@@ -1,5 +1,5 @@
 import { decide } from '../decide';
-import { addMinutes } from '../predict';
+import { addMinutes } from '../../util/time';
 import {
   Confidence,
   DEFAULT_PREFERENCES,

@@ -5,9 +5,16 @@ export interface LiveConditionsProvider {
   getAdjustment(route: Route, now: Date): Promise<LiveAdjustment>;
 }
 
-/** Used until a live feed exists, and as the "feed is down" fallback. */
+/** What to use when there is no live data: no adjustment, flagged unavailable. */
+export const liveUnavailable = (): LiveAdjustment => ({
+  available: false,
+  extraMinutes: 0,
+  incidents: [],
+});
+
+/** Used until a live feed exists. */
 export class NoLiveConditions implements LiveConditionsProvider {
   async getAdjustment(): Promise<LiveAdjustment> {
-    return { available: false, extraMinutes: 0, incidents: [] };
+    return liveUnavailable();
   }
 }

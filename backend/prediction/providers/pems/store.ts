@@ -1,13 +1,16 @@
 import { DayType } from '../../calendar';
 import { ProfileRow } from './types';
 
+export interface ProfileKey {
+  dayType: DayType;
+  /** 0-95, see BUCKET_MINUTES. */
+  bucket: number;
+}
+
 /** Where baseline profiles live. Postgres in production, memory in tests. */
 export interface ProfileStore {
-  getProfiles(
-    stationIds: number[],
-    dayType: DayType,
-    bucket: number,
-  ): Promise<ProfileRow[]>;
+  /** Profiles for these stations at any of the given day types and buckets. */
+  getProfiles(stationIds: number[], keys: ProfileKey[]): Promise<ProfileRow[]>;
 }
 
 export class InMemoryProfileStore implements ProfileStore {
@@ -15,13 +18,12 @@ export class InMemoryProfileStore implements ProfileStore {
 
   async getProfiles(
     stationIds: number[],
-    dayType: DayType,
-    bucket: number,
+    keys: ProfileKey[],
   ): Promise<ProfileRow[]> {
-    const wanted = new Set(stationIds);
+    const stations = new Set(stationIds);
+    const wanted = new Set(keys.map(k => `${k.dayType}|${k.bucket}`));
     return this.rows.filter(
-      r =>
-        wanted.has(r.stationId) && r.dayType === dayType && r.bucket === bucket,
+      r => stations.has(r.stationId) && wanted.has(`${r.dayType}|${r.bucket}`),
     );
   }
 }

@@ -24,6 +24,7 @@ import {
   SUISUN_TO_SAC_STATE,
 } from '../../prediction/providers/pems/metadata';
 import { PgProfileStore } from '../../prediction/providers/pems/pgStore';
+import { PgStationSource } from '../../prediction/providers/routing/pathResolver';
 import {
   PemsBaselineProvider,
   RouteResolver,
@@ -114,6 +115,7 @@ describe('migrations', () => {
       { version: '001_pems_baseline.sql' },
       { version: '002_profile_observed_share.sql' },
       { version: '003_enable_rls.sql' },
+      { version: '004_profile_free_flow.sql' },
     ]);
   });
 
@@ -268,6 +270,40 @@ describe('rebuildProfiles', () => {
     ]);
   });
 
+  it("stores each station's overnight speed as its free-flow speed", async () => {
+    await upsertStations(db, [station(101)]);
+    await insertObservations(db, [
+      obs({ minuteOfDay: 3 * 60, avgSpeedMph: 70 }), // 03:00, overnight
+      obs({ minuteOfDay: 3 * 60 + 5, avgSpeedMph: 66 }),
+      obs({ minuteOfDay: 3 * 60 + 10, avgSpeedMph: 68 }),
+      obs({ minuteOfDay: 8 * 60, avgSpeedMph: 30 }), // rush hour, ignored
+    ]);
+    await rebuildProfiles(db);
+    const rows = await new PgProfileStore(db).getProfiles(
+      [101],
+      [
+        { dayType: 'weekday', bucket: 12 },
+        { dayType: 'weekday', bucket: 32 },
+      ],
+    );
+    assert.equal(rows.length, 2);
+    // The median of 70, 66 and 68, shared by every profile of the station.
+    for (const row of rows) {
+      closeTo(row.freeFlowMph ?? 0, 68, 0.01);
+    }
+  });
+
+  it('leaves free-flow unknown for a station with no overnight data', async () => {
+    await upsertStations(db, [station(101)]);
+    await insertObservations(db, [obs()]); // 08:00 only
+    await rebuildProfiles(db);
+    const [row] = await new PgProfileStore(db).getProfiles(
+      [101],
+      [{ dayType: 'weekday', bucket: 32 }],
+    );
+    assert.equal(row.freeFlowMph, undefined);
+  });
+
   it('lets imputed readings in when the threshold is lowered', async () => {
     await seed();
     assert.equal(await rebuildProfiles(db, { minPctObserved: 0 }), 3);
@@ -327,10 +363,13 @@ describe('Postgres baseline end to end', () => {
     await rebuildProfiles(db);
 
     const resolver: RouteResolver = {
-      resolve: async () => [
-        { stationId: 101, lengthMiles: 2 },
-        { stationId: 102, lengthMiles: 3 },
-      ],
+      resolve: async () => ({
+        segments: [
+          { stationId: 101, lengthMiles: 2 },
+          { stationId: 102, lengthMiles: 3 },
+        ],
+        uncoveredMiles: 0,
+      }),
     };
     const provider = new PemsBaselineProvider(new PgProfileStore(db), resolver);
     // Wednesday 08:00 Pacific daylight time.
@@ -346,9 +385,59 @@ describe('Postgres baseline end to end', () => {
 
   it('returns nothing for an empty station list', async () => {
     assert.deepEqual(
-      await new PgProfileStore(db).getProfiles([], 'weekday', 32),
+      await new PgProfileStore(db).getProfiles(
+        [],
+        [{ dayType: 'weekday', bucket: 32 }],
+      ),
       [],
     );
+  });
+});
+
+describe('PgStationSource', () => {
+  it('loads stations and keeps them until the cache expires', async () => {
+    await upsertStations(db, [station(101), station(102, { direction: 'W' })]);
+    let clock = 0;
+    const source = new PgStationSource(db, 1000, () => clock);
+    const first = await source.getStations();
+    assert.deepEqual(
+      first.map(s => [s.id, s.direction, s.lengthMiles]),
+      [
+        [101, 'E', 1],
+        [102, 'W', 1],
+      ],
+    );
+    await upsertStations(db, [station(103)]);
+    clock = 500;
+    assert.equal((await source.getStations()).length, 2);
+    clock = 1500;
+    assert.equal((await source.getStations()).length, 3);
+  });
+});
+
+describe('PgProfileStore batch reads', () => {
+  it('fetches several day types and buckets in one query', async () => {
+    await upsertStations(db, [station(101)]);
+    await insertObservations(db, [
+      obs({ minuteOfDay: 8 * 60 }),
+      obs({ minuteOfDay: 9 * 60, avgSpeedMph: 40 }),
+      obs({ minuteOfDay: 10 * 60, avgSpeedMph: 30 }),
+      obs({ localDate: '2026-10-17', avgSpeedMph: 70 }), // Saturday 08:00
+    ]);
+    await rebuildProfiles(db);
+    const rows = await new PgProfileStore(db).getProfiles(
+      [101],
+      [
+        { dayType: 'weekday', bucket: 32 },
+        { dayType: 'weekday', bucket: 36 },
+        { dayType: 'weekend', bucket: 32 },
+      ],
+    );
+    assert.deepEqual(rows.map(r => [r.dayType, r.bucket]).sort(), [
+      ['weekday', 32],
+      ['weekday', 36],
+      ['weekend', 32],
+    ]);
   });
 });
 
