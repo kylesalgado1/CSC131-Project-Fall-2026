@@ -18,6 +18,38 @@ interface TomTomResponse {
   }>;
 }
 
+interface TomTomIncidentsResponse {
+  incidents?: Array<{
+    geometry?: { coordinates: unknown };
+    properties: {
+      id?: string;
+      magnitudeOfDelay?: number;
+      delay?: number | null;
+      roadNumbers?: string[];
+      events?: Array<{ description?: string }>;
+    };
+  }>;
+}
+
+/** A traffic incident reported by TomTom. */
+export interface TomTomIncident {
+  id?: string;
+  description: string;
+  road?: string;
+  /** 0 unknown, 1 minor, 2 moderate, 3 major, 4 closure or other. */
+  magnitude: number;
+  delayMinutes: number;
+  /** Points along the incident, which may be a single point. */
+  points: LatLng[];
+}
+
+export interface BoundingBox {
+  minLat: number;
+  minLng: number;
+  maxLat: number;
+  maxLng: number;
+}
+
 export interface TomTomRoute {
   /** The driving path, start to end. */
   points: LatLng[];
@@ -29,6 +61,12 @@ export interface TomTomRoute {
    * historical traffic. Without one: the time with traffic right now.
    */
   travelMinutes: number;
+  /**
+   * Typical traffic for the requested time, from historical data. Without a
+   * departure time this is the typical figure for now, which is what live
+   * traffic is compared with.
+   */
+  historicMinutes?: number;
 }
 
 export interface TomTomOptions {
@@ -81,7 +119,25 @@ export class TomTomRoutingClient {
     }
     const where = `${origin.lat},${origin.lng}:${destination.lat},${destination.lng}`;
     const url = `${this.baseUrl}/routing/1/calculateRoute/${where}/json?${params}`;
-    return this.enqueue(async () => parseRoute(await this.request(url)));
+    return this.enqueue(async () =>
+      parseRoute(await this.request<TomTomResponse>(url)),
+    );
+  }
+
+  /** Incidents in a box. TomTom limits how large the box may be. */
+  incidents(box: BoundingBox): Promise<TomTomIncident[]> {
+    const params = new URLSearchParams({
+      key: this.apiKey,
+      bbox: `${box.minLng},${box.minLat},${box.maxLng},${box.maxLat}`,
+      fields:
+        '{incidents{geometry{coordinates},properties{id,magnitudeOfDelay,delay,roadNumbers,events{description}}}}',
+      language: 'en-GB',
+      timeValidityFilter: 'present',
+    });
+    const url = `${this.baseUrl}/traffic/services/5/incidentDetails?${params}`;
+    return this.enqueue(async () =>
+      parseIncidents(await this.request<TomTomIncidentsResponse>(url)),
+    );
   }
 
   /** Runs tasks strictly in order, and keeps going after one fails. */
@@ -91,7 +147,7 @@ export class TomTomRoutingClient {
     return run;
   }
 
-  private async request(url: string): Promise<TomTomResponse> {
+  private async request<T>(url: string): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       const wait = this.lastSentAt + this.minIntervalMs - this.now();
       if (wait > 0) {
@@ -106,7 +162,7 @@ export class TomTomRoutingClient {
       if (!res.ok) {
         throw new RoutingError(`TomTom request failed: HTTP ${res.status}`);
       }
-      return (await res.json()) as TomTomResponse;
+      return (await res.json()) as T;
     }
   }
 }
@@ -126,7 +182,36 @@ function parseRoute(body: TomTomResponse): TomTomRoute {
       (summary.noTrafficTravelTimeInSeconds ?? summary.travelTimeInSeconds) /
       60,
     travelMinutes: summary.travelTimeInSeconds / 60,
+    historicMinutes:
+      summary.historicTrafficTravelTimeInSeconds === undefined
+        ? undefined
+        : summary.historicTrafficTravelTimeInSeconds / 60,
   };
+}
+
+/** GeoJSON gives a point as [lng, lat] and a line as a list of those. */
+function pointsOf(coordinates: unknown): LatLng[] {
+  if (!Array.isArray(coordinates)) {
+    return [];
+  }
+  if (typeof coordinates[0] === 'number') {
+    return [{ lat: coordinates[1] as number, lng: coordinates[0] }];
+  }
+  return coordinates.flatMap(pointsOf);
+}
+
+function parseIncidents(body: TomTomIncidentsResponse): TomTomIncident[] {
+  return (body.incidents ?? []).map(({ geometry, properties: p }) => ({
+    id: p.id,
+    description: (p.events ?? [])
+      .map(e => e.description)
+      .filter(Boolean)
+      .join('; '),
+    road: p.roadNumbers?.[0],
+    magnitude: p.magnitudeOfDelay ?? 0,
+    delayMinutes: (p.delay ?? 0) / 60,
+    points: pointsOf(geometry?.coordinates),
+  }));
 }
 
 /** Route paths, and the no-traffic time, from TomTom. */

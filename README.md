@@ -61,11 +61,25 @@ npm run import-pems -- \
 
 `import-pems` keeps only stations on the Suisun City to Sac State corridor, loads their readings, and rebuilds the baseline profiles. Pass `--min-observed 0` to keep readings PeMS filled in (District 3 reports most stations as 0% observed). Download the files from the PeMS Data Clearinghouse. Do not commit them.
 
-### How the baseline is computed
+### Where the numbers come from
 
-The routing service gives the trip's no-traffic time, which already includes signals, ramps and surface streets. PeMS then adds the delay: for each station on the route, how much slower traffic moves at that hour than at that station's free-flow speed (its median overnight speed). A station with no data takes the average delay per mile of the ones that have it. Without a routing time, it falls back to summing PeMS speeds, with road that has no station at an assumed 25 mph.
+**TomTom is the main source** when `TOMTOM_API_KEY` is set in `backend/.env`:
 
-Checked against two real commutes (Suisun City to Sac State at 7 am, and back at 6 pm), it lands within 2 minutes. Summing PeMS speeds alone was 13 to 14 minutes too low.
+- One "now" request per trip gives the route path, the no-traffic time, the typical time for right now, and the time with traffic right now.
+- The typical drive time for each of the 13 departure slots comes from TomTom's departure-time predictions, fetched every 30 minutes and interpolated in between. A new trip costs about 10 requests (about 2.7 seconds); repeats within half an hour are instant.
+- **Live delay** is how much slower than typical it is right now, fading out over an hour. **Incidents** are TomTom reports of moderate or major delays, closures, or delays of five minutes or more that lie on the route. An incident drops confidence to Low.
+- Everything TomTom sends is kept **in memory only, for minutes**. Do not store it in the database: TomTom's terms on storing responses are not clear for free plans, so check them before extending that.
+- The free plan allows about 2,500 requests a day and rate limits bursts. The client spaces requests out and retries when TomTom says "too many requests".
+
+**PeMS and OSRM take over if TomTom fails**, and `TRAFFIC_SOURCE=pems` forces them, which is useful for comparing the two. PeMS only covers the roads imported (the Suisun City to Sac State corridor), so outside it the PeMS model understates traffic and says so with low confidence.
+
+The PeMS model adds delay to a routing service's no-traffic time: for each station on the route, how much slower traffic moves at that hour than at that station's free-flow speed (its median overnight speed). A station with no data takes the average delay per mile of the ones that have it. Without a routing time it falls back to summing PeMS speeds, with road that has no station at an assumed 25 mph.
+
+To compare TomTom with the PeMS model for your own trip, without putting coordinates in chat:
+
+```sh
+cd backend && npm run check-trip -- --from "LAT,LNG" --to "LAT,LNG" --times "07:00,18:00" --round-trip
+```
 
 If you change how profiles are built, recompute them from the stored readings without re-importing:
 
@@ -119,4 +133,4 @@ curl -X POST localhost:3000/verdict -H 'content-type: application/json' -d '{
 | 502 `routing_unavailable` | The routing service could not plan the trip                       |
 | 500 `internal`            | Unexpected failure (details are logged, not returned)             |
 
-Route paths come from the public OSRM demo server and rain from Open-Meteo. OSRM is for development only: it is rate limited and has no uptime promise. TomTom replaces it for live traffic and routing.
+Route paths and traffic come from TomTom, with the public OSRM demo server as a development-only fallback, and rain from Open-Meteo.

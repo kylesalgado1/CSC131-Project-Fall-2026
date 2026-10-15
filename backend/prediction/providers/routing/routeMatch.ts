@@ -116,6 +116,32 @@ function closestApproach(point: Point, path: Point[], along: number[]) {
 }
 
 /**
+ * A test for whether a set of points (an incident, say) lies within a given
+ * distance of a route path. Sets the path up once for many tests.
+ */
+export function pathProximity(
+  path: LatLng[],
+  maxMeters: number,
+): (points: LatLng[]) => boolean {
+  if (path.length < 2) {
+    return () => false;
+  }
+  const project = projectorAround(path[0]);
+  const points = path.map(project);
+  const along = cumulativeDistances(points);
+  const nearPath = boundsOf(points, maxMeters);
+  return candidates =>
+    candidates.some(candidate => {
+      const at = project(candidate);
+      if (!nearPath.contains(at)) {
+        return false;
+      }
+      const near = closestApproach(at, points, along);
+      return near !== undefined && near.dist <= maxMeters;
+    });
+}
+
+/**
  * The stations on a route path with how far along the path each one is,
  * nearest the start first. A station is on the path when it is close to it
  * and its direction of travel agrees with the path there.
