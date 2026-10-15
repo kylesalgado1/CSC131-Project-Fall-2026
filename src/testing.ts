@@ -55,3 +55,20 @@ export function typeArriveBy(root: ReactTestInstance, text: string): void {
     input.props.onChangeText(text);
   });
 }
+
+/** Taps a link by its text. */
+export function tapLink(root: ReactTestInstance, label: string): void {
+  const link = root
+    .findAll(
+      node =>
+        node.props.accessibilityRole === 'link' &&
+        typeof node.props.onPress === 'function',
+    )
+    .find(node => allText(node).some(t => t.includes(label)));
+  if (!link) {
+    throw new Error(`No link with text "${label}"`);
+  }
+  act(() => {
+    link.props.onPress();
+  });
+}
