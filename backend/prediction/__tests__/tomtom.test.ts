@@ -1,8 +1,5 @@
 import { FetchLike } from '../../util/http';
-import {
-  TomTomPathProvider,
-  TomTomRoutingClient,
-} from '../providers/routing/tomtom';
+import { TomTomPathProvider, TomTomClient } from '../providers/routing/tomtom';
 import { RoutingError } from '../providers/routing/types';
 import { Route } from '../types';
 
@@ -58,12 +55,10 @@ function fakeEnv(responses: Array<{ status: number; body?: unknown }>) {
   return { fetchFn, options, sent, sleeps };
 }
 
-describe('TomTomRoutingClient', () => {
+describe('TomTomClient', () => {
   it('reads the path, distance and both travel times', async () => {
     const { fetchFn, options } = fakeEnv([{ status: 200 }]);
-    const result = await new TomTomRoutingClient(KEY, fetchFn, options).route(
-      route,
-    );
+    const result = await new TomTomClient(KEY, fetchFn, options).route(route);
     expect(result.points).toEqual([
       { lat: 38.2383, lng: -122.0402 },
       { lat: 38.4, lng: -121.7 },
@@ -76,7 +71,7 @@ describe('TomTomRoutingClient', () => {
 
   it('asks for traffic and puts a departure time on the local clock', async () => {
     const { fetchFn, options, sent } = fakeEnv([{ status: 200 }]);
-    await new TomTomRoutingClient(KEY, fetchFn, options).route(
+    await new TomTomClient(KEY, fetchFn, options).route(
       route,
       new Date('2026-10-21T14:00:00Z'), // 07:00 Pacific daylight time
     );
@@ -92,13 +87,13 @@ describe('TomTomRoutingClient', () => {
 
   it('leaves out the departure time when none is given', async () => {
     const { fetchFn, options, sent } = fakeEnv([{ status: 200 }]);
-    await new TomTomRoutingClient(KEY, fetchFn, options).route(route);
+    await new TomTomClient(KEY, fetchFn, options).route(route);
     expect(new URL(sent[0].url).searchParams.has('departAt')).toBe(false);
   });
 
   it('spaces requests out', async () => {
     const { fetchFn, options, sent } = fakeEnv([{ status: 200 }]);
-    const client = new TomTomRoutingClient(KEY, fetchFn, {
+    const client = new TomTomClient(KEY, fetchFn, {
       ...options,
       minIntervalMs: 300,
     });
@@ -116,7 +111,7 @@ describe('TomTomRoutingClient', () => {
       { status: 429 },
       { status: 200 },
     ]);
-    const result = await new TomTomRoutingClient(KEY, fetchFn, {
+    const result = await new TomTomClient(KEY, fetchFn, {
       ...options,
       minIntervalMs: 0,
     }).route(route);
@@ -127,7 +122,7 @@ describe('TomTomRoutingClient', () => {
 
   it('gives up after its retries with an error that hides the key', async () => {
     const { fetchFn, options, sent } = fakeEnv([{ status: 429 }]);
-    const client = new TomTomRoutingClient(KEY, fetchFn, {
+    const client = new TomTomClient(KEY, fetchFn, {
       ...options,
       minIntervalMs: 0,
       maxRetries: 1,
@@ -142,7 +137,7 @@ describe('TomTomRoutingClient', () => {
   it('does not retry other errors', async () => {
     const { fetchFn, options, sent } = fakeEnv([{ status: 403 }]);
     await expect(
-      new TomTomRoutingClient(KEY, fetchFn, options).route(route),
+      new TomTomClient(KEY, fetchFn, options).route(route),
     ).rejects.toThrow('HTTP 403');
     expect(sent).toHaveLength(1);
   });
@@ -152,13 +147,13 @@ describe('TomTomRoutingClient', () => {
       { status: 200, body: { routes: [] } },
     ]);
     await expect(
-      new TomTomRoutingClient(KEY, fetchFn, options).route(route),
+      new TomTomClient(KEY, fetchFn, options).route(route),
     ).rejects.toThrow('TomTom found no route');
   });
 
   it('keeps working after one request fails', async () => {
     const { fetchFn, options } = fakeEnv([{ status: 500 }, { status: 200 }]);
-    const client = new TomTomRoutingClient(KEY, fetchFn, {
+    const client = new TomTomClient(KEY, fetchFn, {
       ...options,
       minIntervalMs: 0,
     });
@@ -171,7 +166,7 @@ describe('TomTomRoutingClient', () => {
   });
 });
 
-describe('TomTomRoutingClient incidents', () => {
+describe('TomTomClient incidents', () => {
   const incident = (road: string[] | undefined) => ({
     geometry: { coordinates: [[-121.9, 38.4]] },
     properties: {
@@ -186,11 +181,7 @@ describe('TomTomRoutingClient incidents', () => {
     const { fetchFn, options, sent } = fakeEnv([
       { status: 200, body: { incidents: [incident(road)] } },
     ]);
-    const [parsed] = await new TomTomRoutingClient(
-      KEY,
-      fetchFn,
-      options,
-    ).incidents({
+    const [parsed] = await new TomTomClient(KEY, fetchFn, options).incidents({
       minLat: 38,
       minLng: -122,
       maxLat: 39,
@@ -236,7 +227,7 @@ describe('TomTomPathProvider', () => {
   it("returns the path with TomTom's no-traffic time as free-flow", async () => {
     const { fetchFn, options } = fakeEnv([{ status: 200 }]);
     const path = await new TomTomPathProvider(
-      new TomTomRoutingClient(KEY, fetchFn, options),
+      new TomTomClient(KEY, fetchFn, options),
     ).getPath(route);
     expect(path.points).toHaveLength(3);
     expect(path.distanceMiles).toBeCloseTo(50);

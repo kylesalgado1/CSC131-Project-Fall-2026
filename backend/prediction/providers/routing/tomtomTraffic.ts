@@ -29,7 +29,7 @@ import {
   BoundingBox,
   TomTomIncident,
   TomTomRoute,
-  TomTomRoutingClient,
+  TomTomClient,
 } from './tomtom';
 import { RoutePath, RoutePathProvider } from './types';
 
@@ -151,7 +151,7 @@ export class TomTomTraffic
   private readonly campusBreaks: CampusBreak[];
 
   constructor(
-    private readonly client: TomTomRoutingClient,
+    private readonly client: TomTomClient,
     options: TomTomTrafficOptions = {},
   ) {
     const now = options.now ?? Date.now;

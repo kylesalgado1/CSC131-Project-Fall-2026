@@ -135,6 +135,81 @@ describe('predictSlots', () => {
   });
 });
 
+describe('slots for a far-off deadline', () => {
+  const withDeadline = (minutesAway: number): TripRequest => ({
+    ...request,
+    preferences: {
+      ...DEFAULT_PREFERENCES,
+      arriveBy: new Date(NOW.getTime() + minutesAway * 60_000),
+    },
+  });
+  const offsetsOf = async (req: TripRequest) =>
+    (
+      await predictSlots(req, {
+        baseline: flat(30),
+        live: new NoLiveConditions(),
+      })
+    ).map(slot => (slot.departAt.getTime() - NOW.getTime()) / 60_000);
+
+  it('keeps the usual slots when the deadline is within 3 hours', async () => {
+    expect(await offsetsOf(withDeadline(120))).toHaveLength(13);
+    expect(await offsetsOf(withDeadline(180))).toHaveLength(13);
+  });
+
+  it('adds 30-minute slots until the deadline, never past it by more than one', async () => {
+    const offsets = await offsetsOf(withDeadline(300));
+    expect(offsets.slice(12, 17)).toEqual([180, 210, 240, 270, 300]);
+    expect(offsets).toHaveLength(17);
+  });
+
+  it('rounds up to cover a deadline between slots', async () => {
+    const offsets = await offsetsOf(withDeadline(305));
+    expect(offsets[offsets.length - 1]).toBe(330);
+  });
+
+  it('stops at 12 hours however far off the deadline is', async () => {
+    const offsets = await offsetsOf(withDeadline(30 * 60));
+    expect(offsets[offsets.length - 1]).toBe(720);
+  });
+
+  it('puts the far slots on the half hour, so they hold still as "now" moves', async () => {
+    const later = new Date(NOW.getTime() + 7 * 60_000); // 17:07
+    const slotsFor = async (now: Date) =>
+      (
+        await predictSlots(
+          {
+            ...request,
+            now,
+            preferences: {
+              ...DEFAULT_PREFERENCES,
+              arriveBy: new Date(NOW.getTime() + 300 * 60_000),
+            },
+          },
+          { baseline: flat(30), live: new NoLiveConditions() },
+        )
+      ).map(slot => slot.departAt.toISOString());
+    const far = (times: string[]) =>
+      times.filter(t => t.endsWith(':00:00.000Z') || t.endsWith(':30:00.000Z'));
+    const first = await slotsFor(NOW);
+    const second = await slotsFor(later);
+    expect(second.slice(13)).toEqual(
+      first.slice(13).filter(t => t > second[12]),
+    );
+    expect(far(second.slice(13)).length).toBe(second.length - 13);
+    expect(second[13]).toBe('2026-10-13T20:30:00.000Z');
+  });
+
+  it('uses the baseline for the far slots', async () => {
+    const slots = await predictSlots(withDeadline(300), {
+      baseline: new FakeBaselineProvider(at =>
+        at.getTime() > NOW.getTime() + 200 * 60_000 ? 20 : 30,
+      ),
+      live: new NoLiveConditions(),
+    });
+    expect(slots[slots.length - 1].driveMinutes).toBe(20);
+  });
+});
+
 describe('getVerdict', () => {
   it('goes end to end from providers to a stay-or-go answer', async () => {
     // Congested for the first hour, then normal.

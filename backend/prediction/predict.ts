@@ -1,4 +1,4 @@
-import { addMinutes } from '../util/time';
+import { addMinutes, MINUTE_MS, minutesBetween } from '../util/time';
 import { CampusBreak, localTime, specialDayName } from './calendar';
 import { assessConfidence } from './confidence';
 import { BaselineProvider } from './providers/baseline';
@@ -13,16 +13,46 @@ import { LatLng, Route, SlotPrediction, TripRequest } from './types';
 
 export const SLOT_INTERVAL_MINUTES = 15;
 export const HORIZON_MINUTES = 180;
-/** Forecast hours to fetch: the horizon plus time to drive. */
-const WEATHER_HOURS = 6;
+/** Past the normal horizon, slots are this far apart. */
+export const FAR_SLOT_INTERVAL_MINUTES = 30;
+/** The farthest ahead a far-off deadline is planned for. */
+export const MAX_PLAN_MINUTES = 12 * 60;
+/** Extra forecast hours beyond the last slot: time to drive. */
+const WEATHER_EXTRA_HOURS = 3;
 /** Live congestion fades to zero this many minutes after "now". */
 export const LIVE_DECAY_MINUTES = 60;
 
-/** Minutes after "now" of each departure slot, slot 0 being "leave now". */
-const SLOT_OFFSETS = Array.from(
-  { length: HORIZON_MINUTES / SLOT_INTERVAL_MINUTES + 1 },
-  (_, i) => i * SLOT_INTERVAL_MINUTES,
-);
+/**
+ * When each departure slot is, slot 0 being "leave now". Every 15 minutes for
+ * 3 hours. When the arrive-by deadline is farther off, more slots follow on
+ * the half hour, up to the deadline (at most 12 hours out), so a far-off
+ * deadline can be answered with a departure time. Those sit on the clock, not
+ * on "now", so the planned time holds still as the app refreshes.
+ */
+export function slotTimesFor({ now, preferences }: TripRequest): Date[] {
+  const times = Array.from(
+    { length: HORIZON_MINUTES / SLOT_INTERVAL_MINUTES + 1 },
+    (_, i) => addMinutes(now, i * SLOT_INTERVAL_MINUTES),
+  );
+  const deadline = preferences.arriveBy;
+  if (!deadline) {
+    return times;
+  }
+  const grid = FAR_SLOT_INTERVAL_MINUTES * MINUTE_MS;
+  const horizonEnd = now.getTime() + HORIZON_MINUTES * MINUTE_MS;
+  const limit = now.getTime() + MAX_PLAN_MINUTES * MINUTE_MS;
+  // Through the first slot at or after the deadline, so the last one that
+  // still makes it can be told from the end of the forecast.
+  const end = Math.min(limit, Math.ceil(deadline.getTime() / grid) * grid);
+  for (
+    let at = Math.floor(horizonEnd / grid) * grid + grid;
+    at <= end;
+    at += grid
+  ) {
+    times.push(new Date(at));
+  }
+  return times;
+}
 
 export interface PredictionProviders {
   baseline: BaselineProvider;
@@ -50,14 +80,17 @@ export async function predictSlots(
   { baseline, live: liveSource, weather, campusBreaks }: PredictionProviders,
 ): Promise<SlotPrediction[]> {
   const { route, now } = request;
-  const departures = SLOT_OFFSETS.map(offset => addMinutes(now, offset));
+  const departures = slotTimesFor(request);
+  const weatherHours =
+    Math.ceil(minutesBetween(now, departures[departures.length - 1]) / 60) +
+    WEATHER_EXTRA_HOURS;
 
   // The three sources are independent, so ask for them at the same time.
   const [live, forecast, bases] = await Promise.all([
     liveSource.getAdjustment(route, now).catch(liveUnavailable),
     weather
       ? weather
-          .getHourly(midpointOf(route), now, WEATHER_HOURS)
+          .getHourly(midpointOf(route), now, weatherHours)
           .catch((): HourlyWeather[] => [])
       : [],
     baseline.getBaselines
@@ -67,7 +100,10 @@ export async function predictSlots(
 
   return departures.map((departAt, i) => {
     const base = bases[i];
-    const liveFade = Math.max(0, 1 - SLOT_OFFSETS[i] / LIVE_DECAY_MINUTES);
+    const liveFade = Math.max(
+      0,
+      1 - minutesBetween(now, departAt) / LIVE_DECAY_MINUTES,
+    );
     const weatherFactor = rainDelayFactor(
       weatherAt(forecast, departAt)?.precipitationMm ?? 0,
     );

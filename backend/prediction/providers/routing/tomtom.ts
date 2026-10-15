@@ -45,6 +45,25 @@ export interface TomTomIncident {
   points: LatLng[];
 }
 
+interface TomTomSearchResponse {
+  results?: Array<{
+    id?: string;
+    poi?: { name?: string };
+    address?: { freeformAddress?: string };
+    position?: { lat: number; lon: number };
+  }>;
+}
+
+/** A place TomTom found for some typed text. */
+export interface TomTomPlace {
+  id?: string;
+  /** The place's name, when it has one (a business, a campus). */
+  poiName?: string;
+  /** The full address on one line. */
+  address: string;
+  position: LatLng;
+}
+
 export interface BoundingBox {
   minLat: number;
   minLng: number;
@@ -82,11 +101,12 @@ export interface TomTomOptions {
 }
 
 /**
- * TomTom's Routing API. Requests are sent one at a time, spaced out, and
- * retried when TomTom says "too many requests". Errors never include the URL,
- * because the URL carries the API key.
+ * TomTom's routing, traffic incidents and place search. Requests are sent one
+ * at a time, spaced out, and retried when TomTom says "too many requests", so
+ * everything shares one rate limit. Errors never include the URL, because the
+ * URL carries the API key.
  */
-export class TomTomRoutingClient {
+export class TomTomClient {
   private chain: Promise<unknown> = Promise.resolve();
   private lastSentAt = -Infinity;
   private readonly baseUrl: string;
@@ -123,6 +143,31 @@ export class TomTomRoutingClient {
     const url = `${this.baseUrl}/routing/1/calculateRoute/${where}/json?${params}`;
     return this.enqueue(async () =>
       parseRoute(await this.request<TomTomResponse>(url)),
+    );
+  }
+
+  /**
+   * Places matching text as it is being typed. `near` ranks closer places
+   * first, which matters a lot: "raleys" finds the local store with it and a
+   * street in another state without it.
+   */
+  search(query: string, near?: LatLng, limit = 5): Promise<TomTomPlace[]> {
+    const params = new URLSearchParams({
+      key: this.apiKey,
+      typeahead: 'true',
+      limit: String(limit),
+      countrySet: 'US',
+      language: 'en-US',
+    });
+    if (near) {
+      params.set('lat', String(near.lat));
+      params.set('lon', String(near.lng));
+    }
+    const url = `${this.baseUrl}/search/2/search/${encodeURIComponent(
+      query,
+    )}.json?${params}`;
+    return this.enqueue(async () =>
+      parseSearch(await this.request<TomTomSearchResponse>(url)),
     );
   }
 
@@ -191,6 +236,21 @@ function parseRoute(body: TomTomResponse): TomTomRoute {
   };
 }
 
+function parseSearch(body: TomTomSearchResponse): TomTomPlace[] {
+  return (body.results ?? []).flatMap(r =>
+    r.position && r.address?.freeformAddress
+      ? [
+          {
+            id: r.id,
+            poiName: r.poi?.name,
+            address: r.address.freeformAddress,
+            position: { lat: r.position.lat, lng: r.position.lon },
+          },
+        ]
+      : [],
+  );
+}
+
 /** GeoJSON gives a point as [lng, lat] and a line as a list of those. */
 function pointsOf(coordinates: unknown): LatLng[] {
   if (!Array.isArray(coordinates)) {
@@ -221,7 +281,7 @@ function parseIncidents(body: TomTomIncidentsResponse): TomTomIncident[] {
 
 /** Route paths, and the no-traffic time, from TomTom. */
 export class TomTomPathProvider implements RoutePathProvider {
-  constructor(private readonly client: TomTomRoutingClient) {}
+  constructor(private readonly client: TomTomClient) {}
 
   async getPath(route: Route): Promise<RoutePath> {
     const { points, distanceMiles, noTrafficMinutes } = await this.client.route(
