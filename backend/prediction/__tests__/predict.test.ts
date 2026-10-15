@@ -104,6 +104,28 @@ describe('predictSlots', () => {
     expect(slots[0].confidence).toBe('High');
   });
 
+  it('lowers confidence when the history is mostly estimated', async () => {
+    const live = new FakeLiveProvider({
+      available: true,
+      extraMinutes: 0,
+      incidents: [],
+    });
+    const confidenceAt = async (observedShare?: number) =>
+      (
+        await predictSlots(request, {
+          baseline: new FakeBaselineProvider(() => 30, 200, observedShare),
+          live,
+        })
+      )[0];
+
+    expect((await confidenceAt(0.1)).confidence).toBe('Low');
+    expect((await confidenceAt(0.4)).confidence).toBe('Medium');
+    expect((await confidenceAt(0.9)).confidence).toBe('High');
+    // A source that does not report the share is not penalized.
+    expect((await confidenceAt(undefined)).confidence).toBe('High');
+    expect((await confidenceAt(0.1)).confidenceReason).toMatch(/estimated/);
+  });
+
   it('rounds drive time to whole minutes', async () => {
     const slots = await predictSlots(request, {
       baseline: flat(30.4),

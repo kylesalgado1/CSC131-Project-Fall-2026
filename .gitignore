@@ -83,3 +83,10 @@ expo-env.d.ts
 # Generated native projects (expo prebuild)
 /android
 /ios
+
+# Secrets (database URLs, certificates)
+.env
+.env.*
+!.env.example
+*.pem
+*.crt

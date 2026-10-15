@@ -14,6 +14,10 @@ export const LIVE_DECAY_MINUTES = 60;
 /** Fewer observations than this and the baseline is not trusted. */
 export const MIN_SAMPLES = 20;
 export const HIGH_CONFIDENCE_SAMPLES = 50;
+/** Below this share of measured history, confidence is Low. */
+export const LOW_OBSERVED_SHARE = 0.25;
+/** Below this share, confidence is at most Medium. */
+export const MEDIUM_OBSERVED_SHARE = 0.5;
 
 export interface PredictionProviders {
   baseline: BaselineProvider;
@@ -58,7 +62,11 @@ export async function predictSlots(
         1,
         Math.round(base.minutes + live.extraMinutes * fade),
       );
-      const { confidence, reason } = assessConfidence(base.sampleCount, live);
+      const { confidence, reason } = assessConfidence(
+        base.sampleCount,
+        base.observedShare,
+        live,
+      );
       return {
         departAt,
         driveMinutes,
@@ -72,6 +80,7 @@ export async function predictSlots(
 
 function assessConfidence(
   sampleCount: number,
+  observedShare: number | undefined,
   live: LiveAdjustment,
 ): { confidence: Confidence; reason: string } {
   if (live.incidents.length > 0) {
@@ -84,6 +93,18 @@ function assessConfidence(
     return {
       confidence: 'Low',
       reason: 'There is little historical data for this route.',
+    };
+  }
+  if (observedShare !== undefined && observedShare < LOW_OBSERVED_SHARE) {
+    return {
+      confidence: 'Low',
+      reason: 'Most of the history for this route is estimated, not measured.',
+    };
+  }
+  if (observedShare !== undefined && observedShare < MEDIUM_OBSERVED_SHARE) {
+    return {
+      confidence: 'Medium',
+      reason: 'Part of the history for this route is estimated, not measured.',
     };
   }
   if (!live.available) {

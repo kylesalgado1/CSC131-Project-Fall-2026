@@ -35,8 +35,13 @@ export interface Incident {
 export interface BaselineResult {
   /** Typical drive time for the route at the requested departure time. */
   minutes: number;
-  /** How many historical observations the figure is based on. */
+  /** How many days of history the figure is based on. */
   sampleCount: number;
+  /**
+   * Share of that history that was measured rather than estimated, 0-1.
+   * Leave out when the source does not distinguish.
+   */
+  observedShare?: number;
 }
 
 export interface LiveAdjustment {

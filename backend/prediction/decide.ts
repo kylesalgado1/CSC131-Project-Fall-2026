@@ -1,4 +1,4 @@
-  import {
+import {
   Confidence,
   DepartureOption,
   SlotPrediction,
