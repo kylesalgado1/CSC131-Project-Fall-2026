@@ -9,7 +9,8 @@
     "import-pems": "tsx --env-file-if-exists=.env scripts/import-pems.ts",
     "test": "node --import tsx --test \"db/__tests__/*.test.ts\" \"api/__tests__/*.test.ts\"",
     "serve": "tsx --env-file-if-exists=.env scripts/serve.ts",
-    "rebuild-profiles": "tsx --env-file-if-exists=.env scripts/rebuild-profiles.ts"
+    "rebuild-profiles": "tsx --env-file-if-exists=.env scripts/rebuild-profiles.ts",
+    "check-trip": "tsx --env-file-if-exists=.env scripts/check-trip.ts"
   },
   "engines": {
     "node": ">= 22.11.0"
