@@ -18,6 +18,11 @@ export interface Preferences {
   minSavingsMinutes: number;
   /** Optional deadline. When set, no recommendation arrives after it. */
   arriveBy?: Date;
+  /**
+   * Optional latest time to be on the road. When set, no recommendation
+   * waits past it, though leaving now is always allowed.
+   */
+  leaveBy?: Date;
 }
 
 export interface TripRequest {
@@ -79,8 +84,24 @@ export interface DepartureOption {
   driveMinutes: number;
 }
 
+/** How the answer sits against the user's arrive-by deadline. */
+export interface DeadlineInfo {
+  arriveBy: Date;
+  /** Minutes to spare between the recommended arrival and the deadline. */
+  marginMinutes: number;
+  /**
+   * The last departure that still arrives in time. Absent when the forecast
+   * ends before it can be found.
+   */
+  latestDeparture?: DepartureOption;
+}
+
 export interface Verdict {
-  action: 'leave_now' | 'wait';
+  /**
+   * `leave_later` is for a deadline far enough off that the answer is a
+   * departure time rather than a short wait.
+   */
+  action: 'leave_now' | 'wait' | 'leave_later';
   /** 0 when action is leave_now. */
   waitMinutes: number;
   /** One-sentence explanation shown with the answer. */
@@ -94,6 +115,8 @@ export interface Verdict {
   arrivalDelayMinutes: number;
   /** Set when no departure meets the deadline. */
   lateByMinutes?: number;
+  /** Set when there is a deadline and the recommended option meets it. */
+  deadline?: DeadlineInfo;
   confidence: Confidence;
   confidenceReason: string;
   /** Heads-up messages, such as a holiday or rain, for display. */

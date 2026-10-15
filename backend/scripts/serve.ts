@@ -15,6 +15,7 @@
 import { buildServer } from '../api/server';
 import { loadCampusBreaks } from '../config/campusBreaks';
 import { databaseFromEnv } from '../db/pool';
+import { CachedPlaceSearch, TomTomPlaces } from '../places/tomtomPlaces';
 import { PredictionProviders } from '../prediction/predict';
 import {
   FallbackBaselineProvider,
@@ -32,7 +33,7 @@ import {
   PathRouteResolver,
   PgStationSource,
 } from '../prediction/providers/routing/pathResolver';
-import { TomTomRoutingClient } from '../prediction/providers/routing/tomtom';
+import { TomTomClient } from '../prediction/providers/routing/tomtom';
 import { TomTomTraffic } from '../prediction/providers/routing/tomtomTraffic';
 import { CachedWeatherProvider } from '../prediction/providers/weather';
 
@@ -52,8 +53,12 @@ async function main() {
   const apiKey = process.env.TOMTOM_API_KEY;
   const useTomTom = Boolean(apiKey) && process.env.TRAFFIC_SOURCE !== 'pems';
 
-  const tomtom = useTomTom
-    ? new TomTomTraffic(new TomTomRoutingClient(apiKey!), { campusBreaks })
+  const client = useTomTom ? new TomTomClient(apiKey!) : undefined;
+  const tomtom = client
+    ? new TomTomTraffic(client, { campusBreaks })
+    : undefined;
+  const places = client
+    ? new CachedPlaceSearch(new TomTomPlaces(client))
     : undefined;
   const pems = new PemsBaselineProvider(
     new PgProfileStore(db),
@@ -81,7 +86,7 @@ async function main() {
 
   console.log(`Campus breaks loaded: ${campusBreaks.length}`);
 
-  const app = buildServer({ providers });
+  const app = buildServer({ providers, places });
   const port = Number(process.env.PORT ?? 3000);
   await app.listen({ port, host: '0.0.0.0' });
   console.log(`Listening on port ${port}`);

@@ -8,6 +8,7 @@ import { FakeBaselineProvider } from '../../prediction/providers/fake';
 import { BaselineProvider } from '../../prediction/providers/baseline';
 import { NoBaselineCoverageError } from '../../prediction/providers/pems/provider';
 import { RoutingError } from '../../prediction/providers/routing/types';
+import { Place, PlaceSearch, SearchError } from '../../places/types';
 
 const NOW = new Date('2026-10-21T15:00:00Z');
 const trip = {
@@ -98,6 +99,46 @@ describe('POST /verdict', () => {
     );
   });
 
+  it('plans a departure for a far-off deadline', async () => {
+    const deadline = new Date(NOW.getTime() + 5 * 60 * 60_000).toISOString();
+    const body = (
+      await post(serverWith(), { ...trip, arriveBy: deadline })
+    ).json();
+    assert.equal(body.verdict.action, 'leave_later');
+    assert.ok(body.verdict.waitMinutes > 180);
+    assert.ok(
+      Date.parse(body.verdict.recommended.arriveAt) <= Date.parse(deadline),
+    );
+    assert.equal(body.verdict.deadline.arriveBy, deadline);
+    assert.ok(body.slots.length > 13, 'the forecast reaches the deadline');
+  });
+
+  it('honors a leave-by time', async () => {
+    // Without it, waiting 60 minutes saves the most.
+    const limit = new Date(NOW.getTime() + 30 * 60_000).toISOString();
+    const body = (
+      await post(serverWith(), {
+        ...trip,
+        leaveBy: limit,
+        preferences: { goal: 'minimize_time' },
+      })
+    ).json();
+    assert.equal(body.verdict.action, 'wait');
+    assert.ok(body.verdict.waitMinutes <= 30);
+  });
+
+  it('answers leave now when the leave-by time has passed', async () => {
+    const past = new Date(NOW.getTime() - 60_000).toISOString();
+    const body = (
+      await post(serverWith(), {
+        ...trip,
+        leaveBy: past,
+        preferences: { goal: 'minimize_time' },
+      })
+    ).json();
+    assert.equal(body.verdict.action, 'leave_now');
+  });
+
   describe('validation', () => {
     const cases: Array<[string, unknown]> = [
       ['a missing destination', { origin: trip.origin }],
@@ -118,6 +159,7 @@ describe('POST /verdict', () => {
         { ...trip, preferences: { minSavingsMinutes: -1 } },
       ],
       ['a malformed deadline', { ...trip, arriveBy: 'tomorrow' }],
+      ['a malformed leave-by time', { ...trip, leaveBy: 'soon' }],
     ];
     for (const [name, payload] of cases) {
       it(`rejects ${name}`, async () => {
@@ -163,5 +205,83 @@ describe('POST /verdict', () => {
       assert.equal(res.json().error, 'internal');
       assert.ok(!res.body.includes('secret-host'));
     });
+  });
+});
+
+describe('GET /places', () => {
+  const place: Place = {
+    id: 'a',
+    name: 'California State University, Sacramento',
+    address: '6000 J Street, Sacramento, CA 95819',
+    lat: 38.56,
+    lng: -121.42,
+  };
+  const asked: Array<[string, unknown]> = [];
+  const places: PlaceSearch = {
+    search: async (query, near) => {
+      asked.push([query, near]);
+      return [place];
+    },
+  };
+  const withPlaces = (search?: PlaceSearch) =>
+    buildServer({
+      providers: { baseline: clearing, live: new NoLiveConditions() },
+      places: search,
+      now: () => NOW,
+    });
+  const get = (app: ReturnType<typeof withPlaces>, url: string) =>
+    app.inject({ method: 'GET', url });
+
+  it('returns matching places', async () => {
+    const res = await get(withPlaces(places), '/places?q=sac%20state');
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.json(), { places: [place] });
+  });
+
+  it('passes the text and the location hint on', async () => {
+    asked.length = 0;
+    await get(withPlaces(places), '/places?q=raleys&lat=38.2383&lng=-122.0402');
+    assert.deepEqual(asked, [['raleys', { lat: 38.2383, lng: -122.0402 }]]);
+    asked.length = 0;
+    await get(withPlaces(places), '/places?q=raleys');
+    assert.deepEqual(asked, [['raleys', undefined]]);
+  });
+
+  for (const [name, url] of [
+    ['no text', '/places'],
+    ['one character', '/places?q=s'],
+    ['text that is too long', `/places?q=${'a'.repeat(101)}`],
+    ['a latitude without a longitude', '/places?q=sac&lat=38'],
+    ['a longitude without a latitude', '/places?q=sac&lng=-121'],
+    ['a latitude out of range', '/places?q=sac&lat=91&lng=0'],
+  ]) {
+    it(`rejects ${name}`, async () => {
+      const res = await get(withPlaces(places), url);
+      assert.equal(res.statusCode, 400);
+    });
+  }
+
+  it('ignores a parameter it does not know, so callers cannot ask for more', async () => {
+    const res = await get(withPlaces(places), '/places?q=sac&limit=50');
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().places.length, 1);
+  });
+
+  it('says so when place search is not set up', async () => {
+    const res = await get(withPlaces(undefined), '/places?q=sac');
+    assert.equal(res.statusCode, 503);
+    assert.equal(res.json().error, 'search_unavailable');
+  });
+
+  it('hides the details when the search service fails', async () => {
+    const failing: PlaceSearch = {
+      search: async () => {
+        throw new SearchError('TomTom request failed: HTTP 503');
+      },
+    };
+    const res = await get(withPlaces(failing), '/places?q=sac');
+    assert.equal(res.statusCode, 502);
+    assert.equal(res.json().error, 'search_unavailable');
+    assert.ok(!res.body.includes('TomTom'));
   });
 });

@@ -33,7 +33,7 @@ import {
 import { CachedPathProvider } from '../prediction/providers/routing/osrm';
 import {
   TomTomPathProvider,
-  TomTomRoutingClient,
+  TomTomClient,
 } from '../prediction/providers/routing/tomtom';
 import { Route } from '../prediction/types';
 import {
@@ -75,7 +75,7 @@ async function main() {
     ? parseIso(values.date)
     : nextWednesday(new Date());
 
-  const client = new TomTomRoutingClient(apiKey);
+  const client = new TomTomClient(apiKey);
   const db = process.env.DATABASE_URL ? databaseFromEnv() : undefined;
   const pems = db
     ? new PemsBaselineProvider(

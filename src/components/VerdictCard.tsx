@@ -2,6 +2,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Verdict } from '../api/types';
 import { plural } from '../lib/format';
 import {
+  deadlineLines,
   headline,
   optionViews,
   OptionView,
@@ -26,6 +27,7 @@ export function VerdictCard({ verdict, timeOptions }: Props) {
   const tone = theme.tone[toneOf(verdict)];
   const options = optionViews(verdict, timeOptions);
   const tradeoff = tradeoffLines(verdict);
+  const deadline = deadlineLines(verdict, timeOptions);
 
   return (
     <View
@@ -40,7 +42,7 @@ export function VerdictCard({ verdict, timeOptions }: Props) {
           accessibilityRole="header"
           style={[styles.headline, { color: tone }]}
         >
-          {headline(verdict)}
+          {headline(verdict, timeOptions)}
         </Text>
         <Text style={[styles.reason, { color: theme.text }]}>
           {verdict.reason}
@@ -62,6 +64,19 @@ export function VerdictCard({ verdict, timeOptions }: Props) {
             />
           ))}
         </View>
+
+        {deadline.length > 0 ? (
+          <View style={styles.tradeoff}>
+            {deadline.map(line => (
+              <Text
+                key={line}
+                style={[styles.tradeoffLine, { color: theme.text }]}
+              >
+                {line}
+              </Text>
+            ))}
+          </View>
+        ) : null}
 
         {tradeoff.length > 0 ? (
           <View style={styles.tradeoff}>

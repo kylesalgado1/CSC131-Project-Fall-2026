@@ -7,7 +7,7 @@ import {
 import { BaselineProvider } from '../providers/baseline';
 import { pathProximity } from '../providers/routing/routeMatch';
 import { routeKey } from '../providers/routing/routeKey';
-import { TomTomRoutingClient } from '../providers/routing/tomtom';
+import { TomTomClient } from '../providers/routing/tomtom';
 import { TomTomTraffic } from '../providers/routing/tomtomTraffic';
 import { RoutePath, RoutePathProvider } from '../providers/routing/types';
 import { BaselineResult, LatLng, Route } from '../types';
@@ -141,7 +141,7 @@ function fakeTomTom(options: FakeOptions = {}) {
       }),
     };
   };
-  const client = new TomTomRoutingClient('KEY', fetchFn, {
+  const client = new TomTomClient('KEY', fetchFn, {
     minIntervalMs: 0,
     sleep: async () => undefined,
   });
