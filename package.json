@@ -1,0 +1,41 @@
+{
+  "name": "WaitItOut",
+  "version": "0.0.1",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "lint": "eslint .",
+    "test": "jest",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p backend",
+    "test:db": "npm test --prefix backend",
+    "test:all": "npm test && npm run test:db"
+  },
+  "dependencies": {
+    "@react-native/new-app-screen": "0.86.3",
+    "expo": "~57.0.30",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@react-native/eslint-config": "0.86.3",
+    "@types/jest": "^29.5.13",
+    "@types/react": "~19.2.4",
+    "@types/react-test-renderer": "^19.1.0",
+    "babel-preset-expo": "~57.0.15",
+    "eslint": "^8.19.0",
+    "jest": "^29.6.3",
+    "jest-expo": "~57.0.6",
+    "prettier": "2.8.8",
+    "react-test-renderer": "19.2.3",
+    "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">= 22.11.0"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "Wait It Out",
+    "slug": "wait-it-out",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "com.waititout"
+    },
+    "android": {
+      "package": "com.waititout"
+    },
+    "plugins": ["expo-status-bar"]
+  }
+}
