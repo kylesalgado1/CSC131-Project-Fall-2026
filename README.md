@@ -25,6 +25,17 @@ If your network blocks the connection (campus Wi-Fi often does), use `npx expo s
 
 Expo Go can't run everything. Remote push notifications and background location need a development build (see below).
 
+### Try the verdict screen
+
+The app's main screen asks the backend whether to leave now or wait, and shows the answer with both choices, the arrival times, how sure the app is, and any heads-up such as rain.
+
+1. **Start the backend** in one terminal: `cd backend && npm run serve`. It needs `backend/.env` (see Backend below). With `TOMTOM_API_KEY` set it uses live TomTom traffic; without it, PeMS data.
+2. **Start the app** in another terminal: `npm start`, then scan the QR code with Expo Go. Your phone and computer must be on the same Wi-Fi.
+
+The app finds the backend at the same address Expo loaded it from, on port 3000. If that does not work (a tunnel, or a firewall), give it the address directly: `EXPO_PUBLIC_API_URL=http://YOUR-COMPUTER-IP:3000 npm start`. Your computer may ask to allow incoming connections for Node the first time.
+
+The screen refreshes itself every 5 minutes while open, and says when the advice changes. Real traffic on the demo commute rarely says "wait", so under **Data** you can switch to **Sample: Wait**, **Sample: Leave now** or **Sample: Running late** to see every state. Samples are labeled as made-up data on screen. The trip list and settings are stand-ins for trip setup (Epic 3) and preferences (Epic 6).
+
 ### Run on an emulator
 
 ```sh
