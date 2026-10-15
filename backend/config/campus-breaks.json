@@ -1,1 +1,4 @@
-[]
+[
+  { "name": "Winter break", "start": "2026-12-25", "end": "2027-01-01" },
+  { "name": "Spring break", "start": "2027-03-22", "end": "2027-03-26" }
+]

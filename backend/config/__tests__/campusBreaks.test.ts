@@ -113,7 +113,11 @@ describe('loadCampusBreaks', () => {
     await expect(loadCampusBreaks(file)).rejects.toThrow(/bad\.json/);
   });
 
-  it('ships a valid, empty default file to fill in', async () => {
-    expect(await loadCampusBreaks(DEFAULT_CAMPUS_BREAKS_FILE)).toEqual([]);
+  it('ships a default file that the server can start with', async () => {
+    const breaks = await loadCampusBreaks(DEFAULT_CAMPUS_BREAKS_FILE);
+    expect(Array.isArray(breaks)).toBe(true);
+    for (const b of breaks) {
+      expect(b.end >= b.start).toBe(true);
+    }
   });
 });
