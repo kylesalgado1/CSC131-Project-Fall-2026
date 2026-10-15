@@ -115,14 +115,33 @@ function closestApproach(point: Point, path: Point[], along: number[]) {
   return best;
 }
 
+/** Compass bearing in degrees of each direction of travel PeMS and TomTom use. */
+export const COMPASS_BEARING: Record<string, number> = BEARING;
+
+/** Straight-line distance in meters between two points. */
+export function distanceMeters(a: LatLng, b: LatLng): number {
+  const project = projectorAround(a);
+  const { x, y } = project(b);
+  return Math.hypot(x, y);
+}
+
+/** The compass bearing in degrees (0 is north, 90 east) from one point to another. */
+export function bearingDegrees(from: LatLng, to: LatLng): number {
+  const { x, y } = projectorAround(from)(to);
+  return ((Math.atan2(x, y) * 180) / Math.PI + 360) % 360;
+}
+
 /**
  * A test for whether a set of points (an incident, say) lies within a given
- * distance of a route path. Sets the path up once for many tests.
+ * distance of a route path. Sets the path up once for many tests. When the
+ * direction the points travel in is known, only points where the route runs
+ * the same way count, so the other side of a freeway does not.
  */
 export function pathProximity(
   path: LatLng[],
   maxMeters: number,
-): (points: LatLng[]) => boolean {
+  toleranceDegrees = 60,
+): (points: LatLng[], travelBearing?: number) => boolean {
   if (path.length < 2) {
     return () => false;
   }
@@ -130,14 +149,19 @@ export function pathProximity(
   const points = path.map(project);
   const along = cumulativeDistances(points);
   const nearPath = boundsOf(points, maxMeters);
-  return candidates =>
+  return (candidates, travelBearing) =>
     candidates.some(candidate => {
       const at = project(candidate);
       if (!nearPath.contains(at)) {
         return false;
       }
       const near = closestApproach(at, points, along);
-      return near !== undefined && near.dist <= maxMeters;
+      return (
+        near !== undefined &&
+        near.dist <= maxMeters &&
+        (travelBearing === undefined ||
+          angleDiff(travelBearing, near.heading) <= toleranceDegrees)
+      );
     });
 }
 

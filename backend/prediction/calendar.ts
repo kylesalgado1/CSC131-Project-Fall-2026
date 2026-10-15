@@ -158,6 +158,14 @@ export function holidayName(date: CivilDate): string | undefined {
   return undefined;
 }
 
+/** The holiday or campus break on a date, if there is one. */
+export function specialDayName(
+  date: CivilDate,
+  breaks: CampusBreak[] = [],
+): string | undefined {
+  return holidayName(date) ?? campusBreakName(date, breaks);
+}
+
 export function campusBreakName(
   date: CivilDate,
   breaks: CampusBreak[],

@@ -1,6 +1,14 @@
 import { MINUTE_MS } from '../../../util/time';
 import { TtlCache } from '../../../util/ttlCache';
-import { localTime, weekdayOf } from '../../calendar';
+import {
+  addDays,
+  CampusBreak,
+  CivilDate,
+  dayTypeOf,
+  instantAt,
+  localTime,
+  weekdayOf,
+} from '../../calendar';
 import {
   BaselineResult,
   Incident,
@@ -11,7 +19,12 @@ import {
 import { BaselineProvider } from '../baseline';
 import { LiveConditionsProvider } from '../live';
 import { routeKey } from './routeKey';
-import { pathProximity } from './routeMatch';
+import {
+  bearingDegrees,
+  COMPASS_BEARING,
+  distanceMeters,
+  pathProximity,
+} from './routeMatch';
 import {
   BoundingBox,
   TomTomIncident,
@@ -36,12 +49,40 @@ export interface TomTomTrafficOptions {
   incidentRadiusMeters?: number;
   /** TomTom limits a request's area, so a route is covered in boxes. */
   maxIncidentBoxes?: number;
+  /** Local breaks such as spring break, treated like holidays. */
+  campusBreaks?: CampusBreak[];
   now?: () => number;
 }
 
 /** The largest span of one incident box, about 45 km. */
 const MAX_BOX_SPAN_DEGREES = 0.4;
 const BOX_PADDING_DEGREES = 0.005;
+/** An incident shorter than this has no direction we can read from its shape. */
+const MIN_DIRECTION_METERS = 30;
+
+const SATURDAY = 6;
+
+/**
+ * Which way an incident's traffic is heading: the direction in its road label
+ * ("I-80 W") when there is one, otherwise the way its shape runs. Undefined
+ * when it cannot be told, and then the incident is counted, to be safe.
+ */
+function travelBearingOf(incident: TomTomIncident): number | undefined {
+  if (incident.compass) {
+    return COMPASS_BEARING[incident.compass];
+  }
+  const { points } = incident;
+  const first = points[0];
+  const last = points[points.length - 1];
+  return points.length >= 2 &&
+    distanceMeters(first, last) >= MIN_DIRECTION_METERS
+    ? bearingDegrees(first, last)
+    : undefined;
+}
+
+/** The Saturday on or after a date. */
+const saturdayOnOrAfter = (date: CivilDate): CivilDate =>
+  addDays(date, (SATURDAY - weekdayOf(date) + 7) % 7);
 
 /**
  * Incidents worth acting on: a moderate or major delay, a closure, or five
@@ -107,6 +148,7 @@ export class TomTomTraffic
   private readonly assumedHistoryDays: number;
   private readonly incidentRadiusMeters: number;
   private readonly maxIncidentBoxes: number;
+  private readonly campusBreaks: CampusBreak[];
 
   constructor(
     private readonly client: TomTomRoutingClient,
@@ -124,6 +166,11 @@ export class TomTomTraffic
     this.assumedHistoryDays = options.assumedHistoryDays ?? 100;
     this.incidentRadiusMeters = options.incidentRadiusMeters ?? 150;
     this.maxIncidentBoxes = options.maxIncidentBoxes ?? 8;
+    this.campusBreaks = options.campusBreaks ?? [];
+  }
+
+  private isHoliday(at: Date): boolean {
+    return dayTypeOf(localTime(at).date, this.campusBreaks) === 'holiday';
   }
 
   private liveRoute(route: Route): Promise<TomTomRoute> {
@@ -147,7 +194,11 @@ export class TomTomTraffic
   ): Promise<BaselineResult[]> {
     const slots = departAts.map(at => {
       const lower = Math.floor(at.getTime() / this.gridMs) * this.gridMs;
-      return { lower, fraction: (at.getTime() - lower) / this.gridMs };
+      return {
+        lower,
+        fraction: (at.getTime() - lower) / this.gridMs,
+        holiday: this.isHoliday(at),
+      };
     });
     const needed = new Set(
       slots.flatMap(({ lower, fraction }) =>
@@ -161,25 +212,33 @@ export class TomTomTraffic
       ),
     );
 
-    return slots.map(({ lower, fraction }) => {
+    return slots.map(({ lower, fraction, holiday }) => {
       const before = minutes.get(lower)!;
       const after = minutes.get(lower + this.gridMs) ?? before;
       return {
         minutes: before + (after - before) * fraction,
         sampleCount: this.assumedHistoryDays,
         observedShare: 1,
+        basis: holiday ? 'holiday_estimate' : undefined,
       };
     });
   }
 
-  /** Typical drive time for a departure, the same for any date that day. */
+  /**
+   * Typical drive time for a departure, the same for any date that weekday.
+   * TomTom's history is by weekday and knows nothing of holidays, so on a
+   * holiday or campus break this asks about the same time on the coming
+   * Saturday instead, a rough stand-in for a day with no commute.
+   */
   private typicalAt(route: Route, at: Date): Promise<number> {
-    const { date, minuteOfDay } = localTime(at);
-    const key = `${routeKey(route)}|${weekdayOf(date)}|${minuteOfDay}`;
-    return this.typicalMinutes.get(
-      key,
-      async () => (await this.client.route(route, at)).travelMinutes,
-    );
+    const local = localTime(at);
+    const holiday = this.isHoliday(at);
+    const date = holiday ? saturdayOnOrAfter(local.date) : local.date;
+    const key = `${routeKey(route)}|${weekdayOf(date)}|${local.minuteOfDay}`;
+    return this.typicalMinutes.get(key, async () => {
+      const asked = holiday ? instantAt(date, local.minuteOfDay) : at;
+      return (await this.client.route(route, asked)).travelMinutes;
+    });
   }
 
   async getAdjustment(route: Route): Promise<LiveAdjustment> {
@@ -213,7 +272,8 @@ export class TomTomTraffic
     const incidents: Incident[] = [];
     for (const report of reports.flat()) {
       const duplicate = report.id !== undefined && seen.has(report.id);
-      if (duplicate || !isRelevant(report) || !onRoute(report.points)) {
+      const sameWay = onRoute(report.points, travelBearingOf(report));
+      if (duplicate || !isRelevant(report) || !sameWay) {
         continue;
       }
       if (report.id !== undefined) {

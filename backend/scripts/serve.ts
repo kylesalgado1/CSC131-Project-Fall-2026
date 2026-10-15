@@ -5,12 +5,15 @@
  *
  * With TOMTOM_API_KEY set, TomTom is the main traffic source: its route,
  * its typical drive time for each departure, and live delay and incidents.
- * PeMS and OSRM take over if TomTom fails. TRAFFIC_SOURCE=pems skips TomTom
+ * PeMS and OSRM take over if TomTom fails. Campus breaks come from
+ * config/campus-breaks.json (or CAMPUS_BREAKS_FILE) and are treated like
+ * holidays. TRAFFIC_SOURCE=pems skips TomTom
  * entirely, which is handy for comparing the two. OSRM is the public demo
  * server and is for development only. Rain comes from Open-Meteo. PORT
  * defaults to 3000.
  */
 import { buildServer } from '../api/server';
+import { loadCampusBreaks } from '../config/campusBreaks';
 import { databaseFromEnv } from '../db/pool';
 import { PredictionProviders } from '../prediction/predict';
 import {
@@ -44,12 +47,13 @@ function warnFallback(error: unknown) {
 
 async function main() {
   const db = databaseFromEnv();
+  const campusBreaks = await loadCampusBreaks(process.env.CAMPUS_BREAKS_FILE);
   const osrm = new CachedPathProvider(new OsrmPathProvider());
   const apiKey = process.env.TOMTOM_API_KEY;
   const useTomTom = Boolean(apiKey) && process.env.TRAFFIC_SOURCE !== 'pems';
 
   const tomtom = useTomTom
-    ? new TomTomTraffic(new TomTomRoutingClient(apiKey!))
+    ? new TomTomTraffic(new TomTomRoutingClient(apiKey!), { campusBreaks })
     : undefined;
   const pems = new PemsBaselineProvider(
     new PgProfileStore(db),
@@ -57,6 +61,7 @@ async function main() {
       new PgStationSource(db),
       tomtom ? new FallbackPathProvider(tomtom, osrm, warnFallback) : osrm,
     ),
+    { campusBreaks },
   );
   const providers: PredictionProviders = {
     baseline: tomtom
@@ -64,6 +69,7 @@ async function main() {
       : pems,
     live: tomtom ?? new NoLiveConditions(),
     weather: new CachedWeatherProvider(new OpenMeteoWeatherProvider()),
+    campusBreaks,
   };
   console.log(
     tomtom
@@ -72,6 +78,8 @@ async function main() {
       ? 'Traffic source: PeMS only (TRAFFIC_SOURCE=pems)'
       : 'Traffic source: PeMS only (TOMTOM_API_KEY is not set)',
   );
+
+  console.log(`Campus breaks loaded: ${campusBreaks.length}`);
 
   const app = buildServer({ providers });
   const port = Number(process.env.PORT ?? 3000);

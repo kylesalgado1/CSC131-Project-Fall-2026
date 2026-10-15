@@ -44,6 +44,11 @@ export interface BaselineResult {
    * Leave out when the source does not distinguish.
    */
   observedShare?: number;
+  /**
+   * Set when the figure is an estimate rather than history for that day:
+   * a holiday or campus break guessed from a typical weekend.
+   */
+  basis?: 'holiday_estimate';
 }
 
 export interface LiveAdjustment {
@@ -64,6 +69,8 @@ export interface SlotPrediction {
   confidenceReason: string;
   /** Multiplier applied for rain; 1 or absent means none. */
   weatherFactor?: number;
+  /** The holiday or campus break this departure falls on, if any. */
+  holiday?: string;
 }
 
 export interface DepartureOption {

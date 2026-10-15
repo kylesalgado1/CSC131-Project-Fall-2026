@@ -306,7 +306,7 @@ describe('TomTomTraffic incidents', () => {
           at: onRoute(3),
           magnitude: 3,
           delaySeconds: 1080,
-          road: 'I-80 W',
+          road: 'I-80 E',
           description: 'Stationary traffic',
         },
         { id: 'b', at: onRoute(5), magnitude: 2, delaySeconds: 120 },
@@ -315,7 +315,7 @@ describe('TomTomTraffic incidents', () => {
     expect(incidents).toHaveLength(2);
     expect(incidents[0]).toEqual({
       description: 'Stationary traffic',
-      road: 'I-80 W',
+      road: 'I-80 E',
       delayMinutes: 18,
     });
   });
@@ -402,6 +402,143 @@ describe('TomTomTraffic incidents', () => {
     clock = 2000;
     await traffic.getAdjustment(route);
     expect(calls.incidents).toBe(2);
+  });
+});
+
+describe('TomTomTraffic incident direction', () => {
+  // The route runs north-east. Compass labels: E is 52 degrees off, W is 128.
+  const path = line(route.origin, route.destination);
+  const reversed = [...path].reverse();
+  const onRoute = (i: number) => [path[i]];
+  const seen = async (incident: FakeIncident, opts: FakeOptions = {}) => {
+    const { client } = fakeTomTom({ incidents: [incident], ...opts });
+    return (await new TomTomTraffic(client).getAdjustment(route)).incidents;
+  };
+  const delay = { magnitude: 3, delaySeconds: 900 };
+
+  it('ignores an incident on the other side of the freeway, by its label', async () => {
+    expect(
+      await seen({ id: 'a', at: onRoute(4), road: 'I-80 W', ...delay }),
+    ).toEqual([]);
+    expect(
+      await seen({ id: 'b', at: onRoute(4), road: 'CA-113 S', ...delay }),
+    ).toEqual([]);
+  });
+
+  it('counts an incident heading the same way, by its label', async () => {
+    expect(
+      await seen({ id: 'a', at: onRoute(4), road: 'I-80 E', ...delay }),
+    ).toHaveLength(1);
+    expect(
+      await seen({ id: 'b', at: onRoute(4), road: 'I-80 N', ...delay }),
+    ).toHaveLength(1);
+  });
+
+  it('counts the same incident on a route that runs the other way', async () => {
+    const incident = { id: 'a', at: onRoute(4), road: 'I-80 W', ...delay };
+    expect(await seen(incident, { path: reversed })).toHaveLength(1);
+    expect(
+      await seen({ ...incident, road: 'I-80 E' }, { path: reversed }),
+    ).toEqual([]);
+  });
+
+  it('reads the direction from the shape of an incident with no label', async () => {
+    const along = [path[3], path[5]]; // runs the same way as the route
+    const against = [path[5], path[3]];
+    expect(await seen({ id: 'a', at: along, ...delay })).toHaveLength(1);
+    expect(await seen({ id: 'b', at: against, ...delay })).toEqual([]);
+  });
+
+  it('trusts the label over the shape', async () => {
+    const against = [path[5], path[3]];
+    expect(
+      await seen({ id: 'a', at: against, road: 'I-80 E', ...delay }),
+    ).toHaveLength(1);
+    const along = [path[3], path[5]];
+    expect(
+      await seen({ id: 'b', at: along, road: 'I-80 W', ...delay }),
+    ).toEqual([]);
+  });
+
+  it('counts an incident whose direction cannot be told', async () => {
+    const tiny = [
+      path[4],
+      { lat: path[4].lat - 0.00005, lng: path[4].lng - 0.00005 }, // about 7 m, pointing back
+    ];
+    expect(await seen({ id: 'a', at: tiny, ...delay })).toHaveLength(1);
+    expect(await seen({ id: 'b', at: onRoute(4), ...delay })).toHaveLength(1); // a single point
+    expect(
+      await seen({ id: 'c', at: onRoute(4), road: 'I-80', ...delay }),
+    ).toHaveLength(1); // no direction in the label
+  });
+});
+
+describe('TomTomTraffic holidays', () => {
+  // Veterans Day 2026 is Wednesday 11 November; clocks are on Pacific standard time.
+  const VETERANS_7AM = new Date('2026-11-11T15:00:00Z');
+  const askedFor = async (at: Date, options = {}) => {
+    const { client, calls } = fakeTomTom();
+    const traffic = new TomTomTraffic(client, options);
+    const [result] = await traffic.getBaselines(route, [at]);
+    return { result, asked: calls.departAt };
+  };
+
+  it('asks about the coming Saturday on a holiday, at the same time of day', async () => {
+    const { asked } = await askedFor(VETERANS_7AM);
+    expect(asked).toEqual(['2026-11-14T07:00:00-08:00']);
+  });
+
+  it('marks the answer as an estimate, which lowers confidence', async () => {
+    const { result } = await askedFor(VETERANS_7AM);
+    expect(result.basis).toBe('holiday_estimate');
+  });
+
+  it('asks about the day itself when it is an ordinary day', async () => {
+    const { result, asked } = await askedFor(NOW); // Wednesday 21 October
+    expect(asked).toEqual(['2026-10-21T07:00:00-07:00']);
+    expect(result.basis).toBeUndefined();
+  });
+
+  it('treats a campus break like a holiday', async () => {
+    const campusBreaks = [
+      { name: 'Fall break', start: '2026-10-21', end: '2026-10-23' },
+    ];
+    const { result, asked } = await askedFor(NOW, { campusBreaks });
+    expect(asked).toEqual(['2026-10-24T07:00:00-07:00']);
+    expect(result.basis).toBe('holiday_estimate');
+  });
+
+  it('keeps a holiday that is already a Saturday on that Saturday', async () => {
+    // Independence Day 2026 is a Saturday.
+    const { result, asked } = await askedFor(new Date('2026-07-04T14:00:00Z'));
+    expect(asked).toEqual(['2026-07-04T07:00:00-07:00']);
+    expect(result.basis).toBe('holiday_estimate');
+  });
+
+  it('shares what it learned with an ordinary Saturday', async () => {
+    const { client, calls } = fakeTomTom();
+    const traffic = new TomTomTraffic(client);
+    await traffic.getBaselines(route, [VETERANS_7AM]);
+    await traffic.getBaselines(route, [new Date('2026-11-14T15:00:00Z')]); // Saturday 7 AM
+    expect(calls.routing).toBe(1);
+  });
+
+  it('flags only the slots that fall on the holiday', async () => {
+    const { client } = fakeTomTom();
+    // 11:30 PM the night before, then midnight and 12:15 AM on Veterans Day.
+    const start = new Date('2026-11-11T07:30:00Z');
+    const results = await new TomTomTraffic(client).getBaselines(route, [
+      start,
+      addMinutes(start, 15),
+      addMinutes(start, 30),
+      addMinutes(start, 45),
+    ]);
+    expect(results.map(r => r.basis)).toEqual([
+      undefined,
+      undefined,
+      'holiday_estimate',
+      'holiday_estimate',
+    ]);
   });
 });
 

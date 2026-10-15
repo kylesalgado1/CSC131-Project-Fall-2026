@@ -278,15 +278,34 @@ describe('verdict notes', () => {
     ]);
   });
 
-  it('mentions a holiday', () => {
-    // Veterans Day 2026 is a Wednesday.
-    const veterans = new Date('2026-11-11T17:00:00Z');
-    const verdict = decide([slot(0, 30), slot(15, 30)], {
-      ...request,
-      now: veterans,
+  it('mentions a holiday that today falls on', () => {
+    const holiday = (s: SlotPrediction): SlotPrediction => ({
+      ...s,
+      holiday: 'Veterans Day',
     });
+    const verdict = decide(
+      [holiday(slot(0, 30)), holiday(slot(15, 30))],
+      request,
+    );
     expect(verdict.notes).toEqual([
       'Today is Veterans Day, so traffic may differ from a normal day.',
+    ]);
+  });
+
+  it('mentions a holiday that only the departure falls on', () => {
+    // Leaving now is an ordinary day; waiting past midnight is not.
+    const slots = [
+      slot(0, 60),
+      slot(15, 50),
+      { ...slot(30, 30), holiday: 'Veterans Day' },
+    ];
+    const verdict = decide(slots, {
+      ...request,
+      preferences: { ...DEFAULT_PREFERENCES, goal: 'minimize_time' },
+    });
+    expect(verdict.action).toBe('wait');
+    expect(verdict.notes).toEqual([
+      'Leaving then falls on Veterans Day, so traffic may differ from a normal day.',
     ]);
   });
 

@@ -6,7 +6,12 @@ import {
   CachedPathProvider,
   OsrmPathProvider,
 } from '../providers/routing/osrm';
-import { matchStations } from '../providers/routing/routeMatch';
+import {
+  bearingDegrees,
+  distanceMeters,
+  matchStations,
+  pathProximity,
+} from '../providers/routing/routeMatch';
 import { RoutePath, RoutePathProvider } from '../providers/routing/types';
 import { PemsStation } from '../providers/pems/types';
 import { LatLng, Route } from '../types';
@@ -285,5 +290,69 @@ describe('CachedPathProvider', () => {
       destination: route.origin,
     });
     expect(calls).toBe(2);
+  });
+});
+
+describe('bearingDegrees and distanceMeters', () => {
+  const origin = { lat: 38.5, lng: -121.5 };
+
+  it('measures the compass direction from one point to another', () => {
+    expect(bearingDegrees(origin, { lat: 38.6, lng: -121.5 })).toBeCloseTo(
+      0,
+      0,
+    );
+    expect(bearingDegrees(origin, { lat: 38.5, lng: -121.4 })).toBeCloseTo(
+      90,
+      0,
+    );
+    expect(bearingDegrees(origin, { lat: 38.4, lng: -121.5 })).toBeCloseTo(
+      180,
+      0,
+    );
+    expect(bearingDegrees(origin, { lat: 38.5, lng: -121.6 })).toBeCloseTo(
+      270,
+      0,
+    );
+    const northEast = bearingDegrees(origin, { lat: 38.6, lng: -121.375 });
+    expect(northEast).toBeGreaterThan(30);
+    expect(northEast).toBeLessThan(60);
+  });
+
+  it('measures distance in meters', () => {
+    expect(distanceMeters(origin, { lat: 38.501, lng: -121.5 })).toBeCloseTo(
+      110.6,
+      0,
+    );
+    expect(distanceMeters(origin, origin)).toBe(0);
+  });
+});
+
+describe('pathProximity with a direction', () => {
+  const east = road(10); // runs due east
+  const near = pathProximity(east, 150);
+  const onRoad = [at(4, 20)];
+
+  it('counts a point near the path when no direction is given', () => {
+    expect(near(onRoad)).toBe(true);
+  });
+
+  it('counts it when the direction is the same way, within the tolerance', () => {
+    expect(near(onRoad, 90)).toBe(true);
+    expect(near(onRoad, 50)).toBe(true); // 40 degrees off
+    expect(near(onRoad, 140)).toBe(true); // 50 degrees off
+  });
+
+  it('rejects it when the direction is across or against the path', () => {
+    expect(near(onRoad, 0)).toBe(false);
+    expect(near(onRoad, 180)).toBe(false);
+    expect(near(onRoad, 270)).toBe(false);
+  });
+
+  it('still rejects a point that is too far away, whatever its direction', () => {
+    expect(near([at(4, 500)], 90)).toBe(false);
+  });
+
+  it('takes another tolerance', () => {
+    expect(pathProximity(east, 150, 20)(onRoad, 50)).toBe(false);
   });
 });

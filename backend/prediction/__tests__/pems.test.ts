@@ -451,7 +451,23 @@ describe('PemsBaselineProvider', () => {
         row({ stationId: 102, dayType: 'weekend', avgSpeedMph: 60 }),
       ]).getBaseline(ROUTE, THANKSGIVING);
       expect(result.minutes).toBeCloseTo(5);
-      expect(result.sampleCount).toBeLessThan(20);
+      expect(result.basis).toBe('holiday_estimate');
+    });
+
+    it('does not mark an ordinary day as an estimate', async () => {
+      const result = await providerFor([
+        row({ stationId: 101 }),
+        row({ stationId: 102 }),
+      ]).getBaseline(ROUTE, MORNING);
+      expect(result.basis).toBeUndefined();
+    });
+
+    it('does not mark a holiday with its own history as an estimate', async () => {
+      const result = await providerFor([
+        row({ stationId: 101, dayType: 'holiday' }),
+        row({ stationId: 102, dayType: 'holiday' }),
+      ]).getBaseline(ROUTE, THANKSGIVING);
+      expect(result.basis).toBeUndefined();
     });
 
     it('does not use weekday data for a holiday', async () => {
