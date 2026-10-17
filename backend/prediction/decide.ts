@@ -24,6 +24,12 @@ export const BALANCE_DELAY_WEIGHT = 0.5;
 export const PLAN_BUFFER_MINUTES = 10;
 /** For the fastest-drive plan, drive times this close count as equal. */
 const PLAN_TIE_MINUTES = 2;
+/**
+ * With a deadline and steady traffic, leaving now is only advised when the
+ * time left before the latest departure is shorter than this. With more
+ * slack than this, the answer is that there is no rush.
+ */
+export const NO_RUSH_SLACK_MINUTES = 30;
 
 const CONFIDENCE_RANK: Record<Confidence, number> = {
   High: 2,
@@ -184,6 +190,18 @@ export function decide(slots: SlotPrediction[], request: TripRequest): Verdict {
       ? lastOnTime
       : undefined;
 
+  /** No departure is worth recommending; here is the window to leave in. */
+  const noRush = (reason: string, windowEnd: SlotPrediction): Verdict =>
+    buildVerdict(now, leaveNow, leaveNow, reason, {
+      action: 'no_rush',
+      notes: [],
+      deadline: {
+        arriveBy: deadline!,
+        marginMinutes: minutesBetween(leaveNow.arriveAt, deadline!),
+        latestDeparture: toOption(windowEnd),
+      },
+    });
+
   const verdict = (
     chosen: SlotPrediction,
     reason: string,
@@ -284,24 +302,13 @@ export function decide(slots: SlotPrediction[], request: TripRequest): Verdict {
     const bestSaving =
       quietest === undefined ? 0 : leaveNow.driveMinutes - quietest;
     if (!planned && bestSaving > 0) {
-      return buildVerdict(
-        now,
-        leaveNow,
-        leaveNow,
+      return noRush(
         `Waiting would save at most ${plural(bestSaving, 'minute')} of ` +
           `driving, under your ${plural(minSavingsMinutes, 'minute')} ` +
           `minimum, so when you leave hardly matters. Your deadline is ` +
           `${duration(minutesBetween(now, deadline))} away, so there is no ` +
           `need to leave yet.`,
-        {
-          action: 'no_rush',
-          notes: [],
-          deadline: {
-            arriveBy: deadline,
-            marginMinutes: minutesBetween(leaveNow.arriveAt, deadline),
-            latestDeparture: toOption(latest),
-          },
-        },
+        latest,
       );
     }
     if (planned) {
@@ -359,6 +366,42 @@ export function decide(slots: SlotPrediction[], request: TripRequest): Verdict {
       leaveNow,
       `Waiting longer than your ${plural(maxWaitMinutes, 'minute')} maximum ` +
         'would help, but no shorter wait saves enough.',
+    );
+  }
+  // Steady traffic and a deadline with room to spare: leaving now is not
+  // better than leaving later, so say there is no rush and give the window.
+  const windowEnd =
+    latest && leaveBy && leaveBy.getTime() < latest.departAt.getTime()
+      ? undefined
+      : latest;
+  const slack = windowEnd ? minutesBetween(now, windowEnd.departAt) : 0;
+  // Leaving later must not cost noticeably more driving, or leaving now wins.
+  const worstLater = windowEnd
+    ? Math.max(
+        ...slots
+          .filter(s => s.departAt.getTime() <= windowEnd.departAt.getTime())
+          .map(s => s.driveMinutes),
+      )
+    : leaveNow.driveMinutes;
+  const heavierLater = worstLater - leaveNow.driveMinutes;
+  if (
+    deadline &&
+    windowEnd &&
+    slack >= NO_RUSH_SLACK_MINUTES &&
+    heavierLater < minSavingsMinutes
+  ) {
+    return noRush(
+      `Traffic is steady, so waiting will not cut your driving much. ` +
+        `You have ${duration(slack)} before you need to leave to make your ` +
+        `deadline, so there is no need to go yet.`,
+      windowEnd,
+    );
+  }
+  if (deadline && windowEnd && heavierLater >= minSavingsMinutes) {
+    return verdict(
+      leaveNow,
+      `Traffic builds later, up to ${plural(worstLater, 'minute')} of ` +
+        `driving instead of ${leaveNow.driveMinutes}, so leaving now is best.`,
     );
   }
   const hours = Math.round(

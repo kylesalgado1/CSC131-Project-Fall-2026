@@ -232,12 +232,13 @@ describe('decide', () => {
   describe('room to spare before the deadline', () => {
     const min = (minutes: number) => addMinutes(NOW, minutes);
 
-    it('says how much room there is when leaving now is fine', () => {
+    it('says how much room there is when there is time to spare', () => {
       const v = decide(
         slotsOf(CLEARING.map(() => 40)),
         requestWith({ arriveBy: min(120) }),
       );
-      expect(v.action).toBe('leave_now');
+      // Steady traffic and 80 minutes before the latest departure: no rush.
+      expect(v.action).toBe('no_rush');
       expect(v.deadline?.arriveBy).toEqual(min(120));
       expect(v.deadline?.marginMinutes).toBe(80);
     });
@@ -282,6 +283,73 @@ describe('decide', () => {
       );
       expect(late.lateByMinutes).toBeDefined();
       expect(late.deadline).toBeUndefined();
+    });
+  });
+
+  describe('steady traffic with a deadline a couple of hours away', () => {
+    const min = (minutes: number) => addMinutes(NOW, minutes);
+    // A 56 minute drive easing to 51 and staying there, like a late-evening
+    // trip to the city: waiting saves 5 minutes, under the 10 minute minimum.
+    const EVENING = [56, 54, 52, 51, 51, 51, 51, 51, 51, 51, 51, 51, 51];
+
+    it('says there is no rush, with the window, instead of leave now', () => {
+      const v = decide(
+        slotsOf(EVENING),
+        requestWith({ goal: 'minimize_time', arriveBy: min(125) }),
+      );
+      expect(v.action).toBe('no_rush');
+      expect(v.waitMinutes).toBe(0);
+      expect(v.recommended).toEqual(v.leaveNow);
+      expect(v.reason).toBe(
+        'Traffic is steady, so waiting will not cut your driving much. You have 1 hour before you need to leave to make your deadline, so there is no need to go yet.',
+      );
+      expect(v.deadline?.latestDeparture?.departAt).toEqual(min(60));
+      expect(v.deadline?.marginMinutes).toBe(125 - 56);
+    });
+
+    it('does the same with the arrive-by goal', () => {
+      const v = decide(
+        slotsOf(EVENING),
+        requestWith({ goal: 'arrive_by', arriveBy: min(125) }),
+      );
+      expect(v.action).toBe('no_rush');
+    });
+
+    it('still says leave now with little room: 15 minutes before the latest departure', () => {
+      const v = decide(
+        slotsOf(EVENING),
+        requestWith({ goal: 'minimize_time', arriveBy: min(80) }),
+      );
+      expect(v.action).toBe('leave_now');
+    });
+
+    it('still says leave now when a leave-by time leaves under 30 minutes', () => {
+      const v = decide(
+        slotsOf(EVENING),
+        requestWith({
+          goal: 'minimize_time',
+          arriveBy: min(125),
+          leaveBy: min(20),
+        }),
+      );
+      expect(v.action).toBe('leave_now');
+    });
+
+    it('still waits when waiting saves enough', () => {
+      const v = decide(
+        slotsOf(CLEARING),
+        requestWith({ goal: 'minimize_time', arriveBy: min(170) }),
+      );
+      expect(v.action).toBe('wait');
+    });
+
+    it('is unchanged without a deadline', () => {
+      const v = decide(
+        slotsOf(EVENING),
+        requestWith({ goal: 'minimize_time' }),
+      );
+      expect(v.action).toBe('leave_now');
+      expect(v.reason).toBe("Traffic won't improve much in the next 3 hours.");
     });
   });
 
@@ -367,21 +435,22 @@ describe('decide', () => {
       );
     });
 
-    it('for least driving, leaves now when waiting would not save enough', () => {
+    it('for least driving, says no rush when waiting would not save anything', () => {
       const v = decide(
         longSlots(() => 60, 330),
         farRequest({ goal: 'minimize_time', arriveBy: min(300) }),
       );
-      expect(v.action).toBe('leave_now');
+      expect(v.action).toBe('no_rush');
       expect(v.deadline?.latestDeparture?.departAt).toEqual(min(240));
     });
 
-    it('is not used when the deadline is within 3 hours', () => {
+    it('is not used when the deadline is within 3 hours, though there is still no rush', () => {
       const v = decide(
         longSlots(() => 60, 330),
         farRequest({ arriveBy: min(150) }),
       );
-      expect(v.action).toBe('leave_now');
+      expect(v.action).toBe('no_rush');
+      expect(v.waitMinutes).toBe(0);
     });
 
     describe('past what can be planned', () => {
@@ -426,12 +495,23 @@ describe('decide', () => {
         expect(v.deadline?.marginMinutes).toBe(240);
       });
 
-      it('still says leave now when leaving now is already the quietest time', () => {
+      it('says leave now when leaving now is clearly the quietest time, no rush when it barely differs', () => {
         const v = decide(
           longSlots(o => 40 + o / 30, 330),
           farRequest({ goal: 'minimize_time', arriveBy: min(300) }),
         );
+        // Traffic only creeps up (8 minutes by the latest departure, under the
+        // 10 minute minimum), so waiting costs little: still no rush.
+        expect(v.action).toBe('no_rush');
+      });
+
+      it('says leave now when traffic builds a lot before the deadline', () => {
+        const v = decide(
+          longSlots(o => 40 + o / 10, 330),
+          farRequest({ goal: 'minimize_time', arriveBy: min(300) }),
+        );
         expect(v.action).toBe('leave_now');
+        expect(v.reason).toMatch(/^Traffic builds later/);
       });
 
       it('plans normally once the deadline is within reach', () => {
@@ -446,11 +526,13 @@ describe('decide', () => {
         expect(decide(slotsOf(CLEARING), farRequest()).action).not.toBe(
           'no_rush',
         );
+        // A deadline 60 minutes out with a 40 minute drive leaves only 20
+        // minutes before the latest departure: too tight to call it no rush.
         const near = decide(
           slotsOf(CLEARING.map(() => 40)),
-          farRequest({ arriveBy: min(170) }),
+          farRequest({ arriveBy: min(60) }),
         );
-        expect(near.action).not.toBe('no_rush');
+        expect(near.action).toBe('leave_now');
       });
 
       it('still says you will be late when leaving now misses the deadline', () => {
