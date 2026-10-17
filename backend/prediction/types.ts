@@ -99,9 +99,11 @@ export interface DeadlineInfo {
 export interface Verdict {
   /**
    * `leave_later` is for a deadline far enough off that the answer is a
-   * departure time rather than a short wait.
+   * departure time rather than a short wait. `no_rush` is for a deadline
+   * beyond what can be planned yet: there is nothing to recommend, and
+   * `recommended` just repeats `leaveNow`.
    */
-  action: 'leave_now' | 'wait' | 'leave_later';
+  action: 'leave_now' | 'wait' | 'leave_later' | 'no_rush';
   /** 0 when action is leave_now. */
   waitMinutes: number;
   /** One-sentence explanation shown with the answer. */

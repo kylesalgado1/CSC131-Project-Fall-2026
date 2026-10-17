@@ -1,5 +1,5 @@
 import { minutesBetween } from '../util/time';
-import { HORIZON_MINUTES } from './predict';
+import { HORIZON_MINUTES, MAX_PLAN_MINUTES } from './predict';
 import { rainLabel } from './providers/weather';
 import {
   Confidence,
@@ -227,6 +227,32 @@ export function decide(slots: SlotPrediction[], request: TripRequest): Verdict {
       leaveNow,
       `Leave now, you may be late by about ${plural(lateBy, 'minute')}.`,
       { lateByMinutes: lateBy },
+    );
+  }
+
+  // A deadline past the end of the forecast cannot be planned yet. Saying
+  // "leave now" would be wrong, since there is no reason to go early, so say
+  // that there is no rush and when a plan will be possible.
+  if (
+    deadline &&
+    !latest &&
+    arrivesInTime(leaveNow) &&
+    minutesBetween(now, deadline) > HORIZON_MINUTES
+  ) {
+    const planAfter = Math.max(
+      0,
+      minutesBetween(now, deadline) - MAX_PLAN_MINUTES - leaveNow.driveMinutes,
+    );
+    return buildVerdict(
+      now,
+      leaveNow,
+      leaveNow,
+      `Your deadline is ${duration(minutesBetween(now, deadline))} away, ` +
+        `too far ahead to plan a departure. There is no need to leave yet. ` +
+        `A plan will appear once the deadline is within ${duration(
+          MAX_PLAN_MINUTES,
+        )}, in about ${duration(planAfter)}.`,
+      { action: 'no_rush', notes: [] },
     );
   }
 

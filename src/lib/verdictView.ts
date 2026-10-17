@@ -8,6 +8,8 @@ export function headline(verdict: Verdict, timeOptions?: TimeOptions): string {
   switch (verdict.action) {
     case 'leave_now':
       return 'Leave now';
+    case 'no_rush':
+      return 'No need to leave yet';
     case 'leave_later':
       return `Leave at ${formatTime(
         verdict.recommended.departAt,
@@ -54,6 +56,9 @@ export function optionViews(
     drive: `${Math.round(option.driveMinutes)} min drive`,
     recommended,
   });
+  if (verdict.action === 'no_rush') {
+    return []; // nothing to compare: the answer is that there is no rush
+  }
   const now = view(
     'Leave now',
     verdict.leaveNow,
@@ -131,6 +136,12 @@ export function departureChange(
 ): string | undefined {
   if (!previous) {
     return undefined;
+  }
+  if (next.action === 'no_rush') {
+    // The recommended time just follows the clock, so only a flip is news.
+    return previous.action === 'no_rush'
+      ? undefined
+      : 'Update: your deadline is far off, so there is no need to leave yet.';
   }
   const shift =
     (Date.parse(next.recommended.departAt) -
