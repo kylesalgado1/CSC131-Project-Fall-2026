@@ -23,6 +23,33 @@ describe('headline', () => {
   });
 });
 
+const noRush: Verdict = {
+  ...leaveNow,
+  action: 'no_rush',
+  reason: 'Your deadline is 20 hours away. There is no need to leave yet.',
+};
+
+describe('when there is no rush', () => {
+  it('says so, in the calm tone, with no options to compare', () => {
+    expect(headline(noRush)).toBe('No need to leave yet');
+    expect(toneOf(noRush)).toBe('wait');
+    expect(optionViews(noRush, time)).toEqual([]);
+    expect(tradeoffLines(noRush)).toEqual([]);
+    expect(deadlineLines(noRush, time)).toEqual([]);
+  });
+
+  it('announces the change once, not on every refresh', () => {
+    expect(departureChange(leaveNow, noRush, time)).toBe(
+      'Update: your deadline is far off, so there is no need to leave yet.',
+    );
+    const later = {
+      ...noRush,
+      recommended: { ...noRush.recommended, departAt: '2026-10-21T14:05:00Z' },
+    };
+    expect(departureChange(noRush, later, time)).toBeUndefined();
+  });
+});
+
 describe('toneOf', () => {
   it('tells go, wait and late apart', () => {
     expect(toneOf(leaveNow)).toBe('go');

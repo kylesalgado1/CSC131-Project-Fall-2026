@@ -263,14 +263,15 @@ describe('decide', () => {
       );
     });
 
-    it('leaves out the latest departure when the forecast ends before the deadline', () => {
-      // Slots run 3 hours, every one arrives in time, and the deadline is later.
+    it('has no latest departure when the forecast ends before the deadline', () => {
+      // Slots run 3 hours, every one arrives in time, and the deadline is later:
+      // there is nothing to plan yet, so no deadline details are given.
       const v = decide(
         slotsOf(CLEARING.map(() => 40)),
         requestWith({ goal: 'minimize_time', arriveBy: min(400) }),
       );
-      expect(v.deadline?.latestDeparture).toBeUndefined();
-      expect(v.deadline?.marginMinutes).toBe(360);
+      expect(v.action).toBe('no_rush');
+      expect(v.deadline).toBeUndefined();
     });
 
     it('is absent without a deadline, and when the deadline cannot be met', () => {
@@ -379,14 +380,59 @@ describe('decide', () => {
       expect(v.action).toBe('leave_now');
     });
 
-    it('is not used when the forecast ends before the deadline does', () => {
+    describe('past what can be planned', () => {
       // 12 hours of slots, deadline 20 hours out: no way to tell the last time.
-      const v = decide(
-        longSlots(() => 60, 720),
-        requestWith({ arriveBy: min(1200) }),
-      );
-      expect(v.action).toBe('leave_now');
-      expect(v.deadline?.latestDeparture).toBeUndefined();
+      const farOff = () =>
+        decide(
+          longSlots(() => 60, 720),
+          requestWith({ arriveBy: min(1200) }),
+        );
+
+      it('says there is no rush instead of leave now', () => {
+        const v = farOff();
+        expect(v.action).toBe('no_rush');
+        expect(v.waitMinutes).toBe(0);
+        expect(v.recommended).toEqual(v.leaveNow);
+        expect(v.minutesSaved).toBe(0);
+        expect(v.deadline).toBeUndefined();
+        expect(v.notes).toEqual([]);
+      });
+
+      it('says how far off the deadline is and when a plan will appear', () => {
+        // Deadline in 20 hours; a plan is possible 12 hours (plus the 60 minute
+        // drive) before it, so in 7 hours.
+        expect(farOff().reason).toBe(
+          'Your deadline is 20 hours away, too far ahead to plan a departure. There is no need to leave yet. A plan will appear once the deadline is within 12 hours, in about 7 hours.',
+        );
+      });
+
+      it('plans normally once the deadline is within reach', () => {
+        const v = decide(
+          longSlots(() => 60, 720),
+          requestWith({ arriveBy: min(700) }),
+        );
+        expect(v.action).toBe('leave_later');
+      });
+
+      it('does not apply without a deadline or within the usual forecast', () => {
+        expect(decide(slotsOf(CLEARING), requestWith()).action).not.toBe(
+          'no_rush',
+        );
+        const near = decide(
+          slotsOf(CLEARING.map(() => 40)),
+          requestWith({ arriveBy: min(170) }),
+        );
+        expect(near.action).not.toBe('no_rush');
+      });
+
+      it('still says you will be late when leaving now misses the deadline', () => {
+        const v = decide(
+          longSlots(() => 2000, 720),
+          requestWith({ arriveBy: min(1200) }),
+        );
+        expect(v.action).not.toBe('no_rush');
+        expect(v.lateByMinutes).toBeGreaterThan(0);
+      });
     });
 
     it('does not plan ahead when leaving now already misses the deadline', () => {

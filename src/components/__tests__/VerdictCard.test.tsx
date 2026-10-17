@@ -69,6 +69,24 @@ describe('VerdictCard', () => {
     expect(hasText(root, reason)).toBe(false);
   });
 
+  it('shows no rush for a deadline too far off to plan, without a leave-now option', () => {
+    const verdict = {
+      ...sampleResponse('leave_now', NOW).verdict,
+      action: 'no_rush' as const,
+      reason: 'Your deadline is 20 hours away. There is no need to leave yet.',
+    };
+    let renderer!: ReactTestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = ReactTestRenderer.create(
+        <VerdictCard verdict={verdict} timeOptions={time} />,
+      );
+    });
+    const text = allText(renderer.root);
+    expect(text).toContain('No need to leave yet');
+    expect(text).toContain(verdict.reason);
+    expect(text).not.toContain('Leave now');
+  });
+
   it('labels each confidence level', () => {
     expect(hasText(render('leave_now'), 'High confidence')).toBe(true);
     expect(hasText(render('late'), 'Low confidence')).toBe(true);
