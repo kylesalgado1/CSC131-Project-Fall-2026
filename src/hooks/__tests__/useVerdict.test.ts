@@ -5,7 +5,12 @@ import { LocationError } from '../../location/errors';
 import { sampleResponse } from '../../samples';
 import { flush, renderHook } from '../../testing';
 import { Trip } from '../../trip/types';
-import { REFRESH_MS, useVerdict, UseVerdictInput } from '../useVerdict';
+import {
+  LOCATION_REUSE_MS,
+  REFRESH_MS,
+  useVerdict,
+  UseVerdictInput,
+} from '../useVerdict';
 
 const START = new Date('2026-10-21T14:00:00Z');
 const place = (id: string, lat: number, lng: number): Place => ({
@@ -157,6 +162,35 @@ describe('useVerdict from the current location', () => {
     ]);
   });
 
+  it('reuses a recent position when a setting changes, instead of asking again', async () => {
+    const locate = jest.fn().mockResolvedValue({ lat: 38.1, lng: -121.9 });
+    const t = setup(trip, { locate });
+    await flush(1);
+    t.with(trip, {
+      settings: { ...DEFAULT_SETTINGS, arriveBy: { hour: 8, minute: 0 } },
+    });
+    await flush(1);
+    expect(locate).toHaveBeenCalledTimes(1);
+    expect(t.calls).toHaveBeenCalledTimes(2);
+    expect(t.bodies[1].origin).toEqual({ lat: 38.1, lng: -121.9 });
+  });
+
+  it('asks the phone again once the position is a minute old', async () => {
+    const locate = jest
+      .fn()
+      .mockResolvedValueOnce({ lat: 38.1, lng: -121.9 })
+      .mockResolvedValueOnce({ lat: 38.4, lng: -121.6 });
+    const t = setup(trip, { locate });
+    await flush(1);
+    await flush(LOCATION_REUSE_MS + 1);
+    t.with(trip, {
+      settings: { ...DEFAULT_SETTINGS, arriveBy: { hour: 8, minute: 0 } },
+    });
+    await flush(1);
+    expect(locate).toHaveBeenCalledTimes(2);
+    expect(t.bodies[1].origin).toEqual({ lat: 38.4, lng: -121.6 });
+  });
+
   it('reports why when the position is not available, and asks no one', async () => {
     const locate = jest
       .fn()
@@ -234,20 +268,65 @@ describe('useVerdict timing', () => {
     expect(t.calls).toHaveBeenCalledTimes(2);
   });
 
-  it('waits for settings edits to settle before asking again', async () => {
+  it('waits for quick preference edits to settle before asking again', async () => {
+    const t = setup(trip);
+    await flush(1);
+    t.with(trip, {
+      settings: { ...DEFAULT_SETTINGS, maxWaitMinutes: 60 },
+    });
+    await flush(100);
+    t.with(trip, {
+      settings: { ...DEFAULT_SETTINGS, maxWaitMinutes: 45 },
+    });
+    await flush(400);
+    expect(t.calls).toHaveBeenCalledTimes(1); // still waiting for taps to stop
+    await flush(200);
+    expect(t.calls).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks at once when Leave by or Arrive by is set or cleared', async () => {
     const t = setup(trip);
     await flush(1);
     t.with(trip, {
       settings: { ...DEFAULT_SETTINGS, arriveBy: { hour: 8, minute: 0 } },
     });
-    await flush(100);
-    t.with(trip, {
-      settings: { ...DEFAULT_SETTINGS, arriveBy: { hour: 8, minute: 30 } },
-    });
-    await flush(400);
-    expect(t.calls).toHaveBeenCalledTimes(1); // still waiting for typing to stop
-    await flush(200);
+    await flush(1);
     expect(t.calls).toHaveBeenCalledTimes(2);
+    t.with(trip, {
+      settings: { ...DEFAULT_SETTINGS, leaveBy: { hour: 7, minute: 0 } },
+    });
+    await flush(1);
+    expect(t.calls).toHaveBeenCalledTimes(3);
+    t.with(trip);
+    await flush(1);
+    expect(t.calls).toHaveBeenCalledTimes(4);
+  });
+
+  it('keeps the old answer on screen while a changed setting loads', async () => {
+    const t = setup(trip);
+    await flush(1);
+    const before = t.hook.result.current.response;
+    expect(before).toBeDefined();
+    let answer!: (r: Response) => void;
+    t.calls.mockImplementationOnce(
+      () => new Promise<Response>(resolve => (answer = resolve)),
+    );
+    t.with(trip, {
+      settings: { ...DEFAULT_SETTINGS, arriveBy: { hour: 8, minute: 0 } },
+    });
+    await flush(1);
+    const waiting = t.hook.result.current;
+    expect(waiting.response).toBe(before);
+    expect(waiting.loading).toBe(false);
+    expect(waiting.refreshing).toBe(true);
+    answer({
+      ok: true,
+      status: 200,
+      json: async () => sampleResponse('wait', START),
+    } as Response);
+    await flush();
+    expect(t.hook.result.current.refreshing).toBe(false);
+    expect(t.hook.result.current.response).not.toBe(before);
   });
 
   it('answers a restored trip at once even if the screen showed no trip first', async () => {
