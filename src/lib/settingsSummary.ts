@@ -2,7 +2,6 @@ import { formatDuration } from './format';
 import { VerdictSettings } from './request';
 
 const GOAL_LABEL = {
-  balance: 'Balanced',
   minimize_time: 'Least driving',
   arrive_by: 'Arrive by',
 } as const;

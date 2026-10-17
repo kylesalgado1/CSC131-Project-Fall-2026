@@ -4,7 +4,7 @@ import { summarizeSettings } from '../settingsSummary';
 describe('summarizeSettings', () => {
   it('says the goal, no wait limit by default, and the minimum saving', () => {
     expect(summarizeSettings(DEFAULT_SETTINGS)).toBe(
-      'Balanced · no wait limit · only if it saves 10 min',
+      'Least driving · no wait limit · only if it saves 10 min',
     );
   });
 

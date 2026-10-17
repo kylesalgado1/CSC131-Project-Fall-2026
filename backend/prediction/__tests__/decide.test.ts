@@ -118,22 +118,22 @@ describe('decide', () => {
     expect(v.reason).toContain('15 minutes maximum');
   });
 
-  it('prefers a shorter wait in balance mode', () => {
+  it('prefers a shorter wait when arriving soon matters and there is no deadline', () => {
     // Waiting 90 saves the most (28) but arrives 62 minutes later.
     // Waiting 15 saves 15 with no arrival delay.
     const slots = slotsOf([60, 45, 40, 38, 36, 34, 32, 32, 32, 32, 32, 32, 32]);
     const minimize = decide(slots, requestWith({ goal: 'minimize_time' }));
-    const balance = decide(slots, requestWith({ goal: 'balance' }));
+    const balance = decide(slots, requestWith({ goal: 'arrive_by' }));
     expect(minimize.waitMinutes).toBe(90);
     expect(balance.action).toBe('wait');
     expect(balance.waitMinutes).toBe(15);
   });
 
-  it('leaves now in balance mode when the delay outweighs the saving', () => {
+  it('leaves now with an arrive-by goal and no deadline when the delay outweighs the saving', () => {
     // Saves 10 minutes but only by waiting 60: delay 50, weighted 25 > 10.
     const v = decide(
       slotsOf([50, 50, 50, 50, 40, 40, 40, 40, 40, 40, 40, 40, 40]),
-      requestWith({ goal: 'balance' }),
+      requestWith({ goal: 'arrive_by' }),
     );
     expect(v.action).toBe('leave_now');
   });
@@ -286,6 +286,10 @@ describe('decide', () => {
   });
 
   describe('a deadline far beyond the forecast', () => {
+    // These plans are about leaving as late as the deadline allows, which is
+    // the Arrive by goal. Tests of other goals say so themselves.
+    const farRequest = (prefs: Partial<Preferences> = {}) =>
+      requestWith({ goal: 'arrive_by', ...prefs });
     const min = (minutes: number) => addMinutes(NOW, minutes);
     /** 15-minute slots to 3 hours, then every 30, out to `last` minutes. */
     function longSlots(driveAt: (offset: number) => number, last: number) {
@@ -309,7 +313,7 @@ describe('decide', () => {
       // Deadline at +300, 60-minute drives: leave at +230 to arrive at +290.
       const v = decide(
         longSlots(() => 60, 330),
-        requestWith({ arriveBy: min(300) }),
+        farRequest({ arriveBy: min(300) }),
       );
       expect(v.action).toBe('leave_later');
       expect(v.recommended.departAt).toEqual(min(210)); // slots are 30 apart: +240 would arrive at +300, with no spare
@@ -324,7 +328,7 @@ describe('decide', () => {
     it('ignores the longest-wait setting, which is for short waits', () => {
       const v = decide(
         longSlots(() => 60, 330),
-        requestWith({ arriveBy: min(300), maxWaitMinutes: 30 }),
+        farRequest({ arriveBy: min(300), maxWaitMinutes: 30 }),
       );
       expect(v.action).toBe('leave_later');
       expect(v.waitMinutes).toBe(210);
@@ -333,7 +337,7 @@ describe('decide', () => {
     it('stops at the leave-by time, and says so', () => {
       const v = decide(
         longSlots(() => 60, 330),
-        requestWith({ arriveBy: min(300), leaveBy: min(200) }),
+        farRequest({ arriveBy: min(300), leaveBy: min(200) }),
       );
       expect(v.action).toBe('leave_later');
       expect(v.recommended.departAt).toEqual(min(180)); // the last slot at or before +200
@@ -343,7 +347,7 @@ describe('decide', () => {
     it('does not use the plan when leave-by has already passed', () => {
       const v = decide(
         longSlots(() => 60, 330),
-        requestWith({ arriveBy: min(300), leaveBy: min(-5) }),
+        farRequest({ arriveBy: min(300), leaveBy: min(-5) }),
       );
       expect(v.action).toBe('leave_now');
     });
@@ -353,7 +357,7 @@ describe('decide', () => {
       const slots = longSlots(o => (o <= 120 ? 90 : 60), 330);
       const v = decide(
         slots,
-        requestWith({ goal: 'minimize_time', arriveBy: min(300) }),
+        farRequest({ goal: 'minimize_time', arriveBy: min(300) }),
       );
       expect(v.action).toBe('leave_later');
       expect(v.recommended.driveMinutes).toBe(60);
@@ -366,7 +370,7 @@ describe('decide', () => {
     it('for least driving, leaves now when waiting would not save enough', () => {
       const v = decide(
         longSlots(() => 60, 330),
-        requestWith({ goal: 'minimize_time', arriveBy: min(300) }),
+        farRequest({ goal: 'minimize_time', arriveBy: min(300) }),
       );
       expect(v.action).toBe('leave_now');
       expect(v.deadline?.latestDeparture?.departAt).toEqual(min(240));
@@ -375,7 +379,7 @@ describe('decide', () => {
     it('is not used when the deadline is within 3 hours', () => {
       const v = decide(
         longSlots(() => 60, 330),
-        requestWith({ arriveBy: min(150) }),
+        farRequest({ arriveBy: min(150) }),
       );
       expect(v.action).toBe('leave_now');
     });
@@ -385,7 +389,7 @@ describe('decide', () => {
       const farOff = () =>
         decide(
           longSlots(() => 60, 720),
-          requestWith({ arriveBy: min(1200) }),
+          farRequest({ arriveBy: min(1200) }),
         );
 
       it('says there is no rush instead of leave now', () => {
@@ -411,7 +415,7 @@ describe('decide', () => {
         // 5, under the 10 minute minimum. Nothing is worth recommending.
         const v = decide(
           longSlots(o => (o === 0 ? 60 : 55), 330),
-          requestWith({ goal: 'minimize_time', arriveBy: min(300) }),
+          farRequest({ goal: 'minimize_time', arriveBy: min(300) }),
         );
         expect(v.action).toBe('no_rush');
         expect(v.reason).toBe(
@@ -425,7 +429,7 @@ describe('decide', () => {
       it('still says leave now when leaving now is already the quietest time', () => {
         const v = decide(
           longSlots(o => 40 + o / 30, 330),
-          requestWith({ goal: 'minimize_time', arriveBy: min(300) }),
+          farRequest({ goal: 'minimize_time', arriveBy: min(300) }),
         );
         expect(v.action).toBe('leave_now');
       });
@@ -433,18 +437,18 @@ describe('decide', () => {
       it('plans normally once the deadline is within reach', () => {
         const v = decide(
           longSlots(() => 60, 720),
-          requestWith({ arriveBy: min(700) }),
+          farRequest({ arriveBy: min(700) }),
         );
         expect(v.action).toBe('leave_later');
       });
 
       it('does not apply without a deadline or within the usual forecast', () => {
-        expect(decide(slotsOf(CLEARING), requestWith()).action).not.toBe(
+        expect(decide(slotsOf(CLEARING), farRequest()).action).not.toBe(
           'no_rush',
         );
         const near = decide(
           slotsOf(CLEARING.map(() => 40)),
-          requestWith({ arriveBy: min(170) }),
+          farRequest({ arriveBy: min(170) }),
         );
         expect(near.action).not.toBe('no_rush');
       });
@@ -452,7 +456,7 @@ describe('decide', () => {
       it('still says you will be late when leaving now misses the deadline', () => {
         const v = decide(
           longSlots(() => 2000, 720),
-          requestWith({ arriveBy: min(1200) }),
+          farRequest({ arriveBy: min(1200) }),
         );
         expect(v.action).not.toBe('no_rush');
         expect(v.lateByMinutes).toBeGreaterThan(0);
@@ -462,7 +466,7 @@ describe('decide', () => {
     it('does not plan ahead when leaving now already misses the deadline', () => {
       const v = decide(
         longSlots(() => 400, 330),
-        requestWith({ arriveBy: min(300) }),
+        farRequest({ arriveBy: min(300) }),
       );
       expect(v.action).not.toBe('leave_later');
       expect(v.lateByMinutes).toBeGreaterThan(0);
@@ -486,7 +490,7 @@ describe('decide', () => {
 
     it('applies the deadline to every goal', () => {
       const deadline = new Date('2026-10-13T18:50:00Z');
-      for (const goal of ['minimize_time', 'balance', 'arrive_by'] as const) {
+      for (const goal of ['minimize_time', 'arrive_by'] as const) {
         const v = decide(
           slotsOf(CLEARING),
           requestWith({ goal, arriveBy: deadline }),

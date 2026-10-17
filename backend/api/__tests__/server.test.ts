@@ -60,12 +60,23 @@ describe('POST /verdict', () => {
     assert.equal(body.slots[1].departAt, '2026-10-21T15:15:00.000Z');
   });
 
-  it('defaults to a balanced goal', async () => {
+  it('defaults to the least-driving goal', async () => {
     const implicit = (await post(serverWith(), trip)).json();
     const explicit = (
-      await post(serverWith(), { ...trip, preferences: { goal: 'balance' } })
+      await post(serverWith(), {
+        ...trip,
+        preferences: { goal: 'minimize_time' },
+      })
     ).json();
     assert.deepEqual(implicit, explicit);
+  });
+
+  it('no longer accepts the removed balance goal', async () => {
+    const response = await post(serverWith(), {
+      ...trip,
+      preferences: { goal: 'balance' },
+    });
+    assert.equal(response.statusCode, 400);
   });
 
   it('ignores a client-supplied clock', async () => {

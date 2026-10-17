@@ -390,7 +390,7 @@ describe('the answer', () => {
     expect(api.verdicts[0]).toMatchObject({
       origin: { lat: HOME.lat, lng: HOME.lng },
       destination: { lat: SAC_STATE.lat, lng: SAC_STATE.lng },
-      preferences: { goal: 'balance', minSavingsMinutes: 10 },
+      preferences: { goal: 'minimize_time', minSavingsMinutes: 10 },
     });
     expect(api.verdicts[0].preferences).not.toHaveProperty('maxWaitMinutes');
     expect(allText(root)).toContain('Leave now');
@@ -411,11 +411,13 @@ describe('the answer', () => {
     await saveTrip(campusTrip);
     const root = await open(backend([sampleResponse('leave_now', START)]));
     expect(
-      hasText(root, 'Balanced · no wait limit · only if it saves 10 min'),
+      hasText(root, 'Least driving · no wait limit · only if it saves 10 min'),
     ).toBe(true);
     expect(hasText(root, 'LONGEST I WILL WAIT')).toBe(false);
     press(root, 'Preferences');
     expect(hasText(root, 'LONGEST I WILL WAIT')).toBe(true);
+    expect(hasText(root, 'Least driving')).toBe(true);
+    expect(hasText(root, 'Balanced')).toBe(false); // that goal is gone
   });
 
   it('sends the preferences the user picks', async () => {
