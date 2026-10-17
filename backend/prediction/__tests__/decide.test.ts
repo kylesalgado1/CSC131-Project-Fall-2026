@@ -406,6 +406,30 @@ describe('decide', () => {
         );
       });
 
+      it('also says there is no rush when waiting saves too little driving', () => {
+        // Leaving now takes 60; the quietest later time takes 55, a saving of
+        // 5, under the 10 minute minimum. Nothing is worth recommending.
+        const v = decide(
+          longSlots(o => (o === 0 ? 60 : 55), 330),
+          requestWith({ goal: 'minimize_time', arriveBy: min(300) }),
+        );
+        expect(v.action).toBe('no_rush');
+        expect(v.reason).toBe(
+          'Waiting would save at most 5 minutes of driving, under your 10 minutes minimum, so when you leave hardly matters. Your deadline is 5 hours away, so there is no need to leave yet.',
+        );
+        expect(v.recommended).toEqual(v.leaveNow);
+        expect(v.deadline?.latestDeparture?.departAt).toEqual(min(240));
+        expect(v.deadline?.marginMinutes).toBe(240);
+      });
+
+      it('still says leave now when leaving now is already the quietest time', () => {
+        const v = decide(
+          longSlots(o => 40 + o / 30, 330),
+          requestWith({ goal: 'minimize_time', arriveBy: min(300) }),
+        );
+        expect(v.action).toBe('leave_now');
+      });
+
       it('plans normally once the deadline is within reach', () => {
         const v = decide(
           longSlots(() => 60, 720),

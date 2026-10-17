@@ -51,7 +51,8 @@ export interface DeadlineInfo {
 export interface Verdict {
   /**
    * `leave_later` is a departure time for a deadline far off. `no_rush` means
-   * the deadline is too far off to plan yet; `recommended` repeats `leaveNow`.
+   * nothing is recommended, because the deadline is too far off to plan yet or
+   * the departure time hardly matters; `recommended` repeats `leaveNow`.
    */
   action: 'leave_now' | 'wait' | 'leave_later' | 'no_rush';
   waitMinutes: number;
