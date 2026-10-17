@@ -1,4 +1,8 @@
-import Fastify, { FastifyInstance } from 'fastify';
+import Fastify, {
+  FastifyInstance,
+  FastifyReply,
+  FastifyRequest,
+} from 'fastify';
 import { getVerdict } from '../prediction';
 import { PlaceSearch, SearchError } from '../places/types';
 import { PredictionProviders } from '../prediction/predict';
@@ -8,7 +12,7 @@ import { DEFAULT_PREFERENCES, Goal } from '../prediction/types';
 
 export interface ServerDeps {
   providers: PredictionProviders;
-  /** Place search for choosing a start and destination. Absent without TomTom. */
+  /** Place search for choosing a start and destination. Absent when not set up. */
   places?: PlaceSearch;
   /** The server's clock decides "now". Overridable for tests. */
   now?: () => Date;
@@ -74,6 +78,47 @@ const placesSchema = {
   },
 } as const;
 
+/**
+ * Every failure leaves through here. Expected ones get a clear message;
+ * unexpected ones are logged and never shown to the client.
+ */
+function sendError(
+  error: Error,
+  request: FastifyRequest,
+  reply: FastifyReply,
+): FastifyReply {
+  if (error instanceof NoBaselineCoverageError) {
+    return reply.code(422).send({
+      error: 'no_coverage',
+      message: 'There is not enough traffic data for this route yet.',
+    });
+  }
+  if (error instanceof RoutingError) {
+    request.log.error(error);
+    return reply.code(502).send({
+      error: 'routing_unavailable',
+      message: 'The routing service could not plan this trip.',
+    });
+  }
+  if (error instanceof SearchError) {
+    request.log.error(error);
+    return reply.code(502).send({
+      error: 'search_unavailable',
+      message: 'Place search is not available right now.',
+    });
+  }
+  const status = (error as { statusCode?: number }).statusCode ?? 500;
+  if (status >= 500) {
+    request.log.error(error);
+    return reply
+      .code(500)
+      .send({ error: 'internal', message: 'Something went wrong.' });
+  }
+  return reply
+    .code(status)
+    .send({ error: 'bad_request', message: (error as Error).message });
+}
+
 export function buildServer({
   providers,
   places,
@@ -127,40 +172,7 @@ export function buildServer({
     },
   );
 
-  // Every failure leaves through here. Expected ones get a clear message;
-  // unexpected ones are logged and never shown to the client.
-  app.setErrorHandler((error, request, reply) => {
-    if (error instanceof NoBaselineCoverageError) {
-      return reply.code(422).send({
-        error: 'no_coverage',
-        message: 'There is not enough traffic data for this route yet.',
-      });
-    }
-    if (error instanceof RoutingError) {
-      request.log.error(error);
-      return reply.code(502).send({
-        error: 'routing_unavailable',
-        message: 'The routing service could not plan this trip.',
-      });
-    }
-    if (error instanceof SearchError) {
-      request.log.error(error);
-      return reply.code(502).send({
-        error: 'search_unavailable',
-        message: 'Place search is not available right now.',
-      });
-    }
-    const status = (error as { statusCode?: number }).statusCode ?? 500;
-    if (status >= 500) {
-      request.log.error(error);
-      return reply
-        .code(500)
-        .send({ error: 'internal', message: 'Something went wrong.' });
-    }
-    return reply
-      .code(status)
-      .send({ error: 'bad_request', message: (error as Error).message });
-  });
+  app.setErrorHandler(sendError);
 
   return app;
 }

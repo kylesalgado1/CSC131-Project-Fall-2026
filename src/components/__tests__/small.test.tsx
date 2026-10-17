@@ -86,7 +86,10 @@ describe('TripCard', () => {
 describe('Collapsible', () => {
   it('is folded away to begin with, showing its summary', () => {
     const root = render(
-      <Collapsible title="Preferences" summary="Least driving · wait up to 1 hr">
+      <Collapsible
+        title="Preferences"
+        summary="Least driving · wait up to 1 hr"
+      >
         <></>
       </Collapsible>,
     );

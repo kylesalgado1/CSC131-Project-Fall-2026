@@ -5,6 +5,7 @@ import {
   Confidence,
   DepartureOption,
   Goal,
+  Preferences,
   SlotPrediction,
   TripRequest,
   Verdict,
@@ -12,10 +13,10 @@ import {
 
 /**
  * With an Arrive by goal but no deadline, a minute of added arrival delay
- * costs this fraction of a minute saved in the car. A wait is only worth it when saved time outweighs
- * the weighted delay.
+ * costs this fraction of a minute saved in the car. A wait is only worth it
+ * when saved time outweighs the weighted delay.
  */
-export const BALANCE_DELAY_WEIGHT = 0.5;
+export const ARRIVAL_DELAY_WEIGHT = 0.5;
 
 /**
  * When a far-off deadline is planned for, aim to arrive this many minutes
@@ -164,12 +165,42 @@ function planFor(
     : undefined;
 }
 
-/**
- * Turns predicted slots (slot 0 is "leave now") and the user's preferences
- * into a stay-or-go answer. Pure: no clock, network or storage access.
- */
-export function decide(slots: SlotPrediction[], request: TripRequest): Verdict {
-  const { now, preferences } = request;
+/** Everything the decision steps need, worked out once per decision. */
+interface Decision {
+  now: Date;
+  preferences: Preferences;
+  slots: SlotPrediction[];
+  leaveNow: SlotPrediction;
+  deadline?: Date;
+  leaveBy?: Date;
+  maxWaitMinutes?: number;
+  minSavingsMinutes: number;
+  /**
+   * The last departure that still makes the deadline, when the forecast runs
+   * past it so we can tell it is the last.
+   */
+  latest?: SlotPrediction;
+  /** Later departures that arrive in time. */
+  feasible: SlotPrediction[];
+  timing(slot: SlotPrediction): Timing;
+  arrivesInTime(slot: SlotPrediction): boolean;
+  departsInTime(slot: SlotPrediction): boolean;
+  withinMaxWait(slot: SlotPrediction): boolean;
+  waitAllowed(slot: SlotPrediction): boolean;
+  /** The answer for a chosen departure, with the deadline's details added. */
+  verdict(
+    chosen: SlotPrediction,
+    reason: string,
+    extra?: Partial<Verdict>,
+  ): Verdict;
+  /** No departure is worth recommending; here is the window to leave in. */
+  noRush(reason: string, windowEnd: SlotPrediction): Verdict;
+}
+
+function decisionFor(
+  slots: SlotPrediction[],
+  { now, preferences }: TripRequest,
+): Decision {
   const {
     arriveBy: deadline,
     leaveBy,
@@ -177,238 +208,325 @@ export function decide(slots: SlotPrediction[], request: TripRequest): Verdict {
     minSavingsMinutes,
   } = preferences;
   const leaveNow = slots[0];
-
-  const timing = (slot: SlotPrediction) => timingOf(now, leaveNow, slot);
   const arrivesInTime = (slot: SlotPrediction) =>
     !deadline || slot.arriveAt.getTime() <= deadline.getTime();
-
-  // The last departure that still makes the deadline, when the forecast runs
-  // past it so we can tell it is the last.
   const lastOnTime = slots.filter(arrivesInTime).pop();
   const latest =
     deadline && lastOnTime && lastOnTime !== slots[slots.length - 1]
       ? lastOnTime
       : undefined;
-
-  /** No departure is worth recommending; here is the window to leave in. */
-  const noRush = (reason: string, windowEnd: SlotPrediction): Verdict =>
-    buildVerdict(now, leaveNow, leaveNow, reason, {
-      action: 'no_rush',
-      notes: [],
-      deadline: {
-        arriveBy: deadline!,
-        marginMinutes: minutesBetween(leaveNow.arriveAt, deadline!),
-        latestDeparture: toOption(windowEnd),
-      },
-    });
-
-  const verdict = (
-    chosen: SlotPrediction,
-    reason: string,
-    extra?: Partial<Verdict>,
-  ): Verdict => {
-    const built = buildVerdict(now, leaveNow, chosen, reason, extra);
-    if (!deadline || !arrivesInTime(chosen)) {
-      return built;
-    }
-    return {
-      ...built,
-      deadline: {
-        arriveBy: deadline,
-        marginMinutes: minutesBetween(chosen.arriveAt, deadline),
-        ...(latest ? { latestDeparture: toOption(latest) } : {}),
-      },
-    };
-  };
+  const timing = (slot: SlotPrediction) => timingOf(now, leaveNow, slot);
   const withinMaxWait = (slot: SlotPrediction) =>
     maxWaitMinutes === undefined || timing(slot).wait <= maxWaitMinutes;
   const departsInTime = (slot: SlotPrediction) =>
     !leaveBy || slot.departAt.getTime() <= leaveBy.getTime();
-  const waitAllowed = (slot: SlotPrediction) =>
-    withinMaxWait(slot) && departsInTime(slot);
 
-  const feasible = slots.slice(1).filter(arrivesInTime);
+  return {
+    now,
+    preferences,
+    slots,
+    leaveNow,
+    deadline,
+    leaveBy,
+    maxWaitMinutes,
+    minSavingsMinutes,
+    latest,
+    feasible: slots.slice(1).filter(arrivesInTime),
+    timing,
+    arrivesInTime,
+    departsInTime,
+    withinMaxWait,
+    waitAllowed: slot => withinMaxWait(slot) && departsInTime(slot),
+    verdict(chosen, reason, extra) {
+      const built = buildVerdict(now, leaveNow, chosen, reason, extra);
+      if (!deadline || !arrivesInTime(chosen)) {
+        return built;
+      }
+      return {
+        ...built,
+        deadline: {
+          arriveBy: deadline,
+          marginMinutes: minutesBetween(chosen.arriveAt, deadline),
+          ...(latest ? { latestDeparture: toOption(latest) } : {}),
+        },
+      };
+    },
+    noRush(reason, windowEnd) {
+      return buildVerdict(now, leaveNow, leaveNow, reason, {
+        action: 'no_rush',
+        notes: [],
+        deadline: {
+          arriveBy: deadline!,
+          marginMinutes: minutesBetween(leaveNow.arriveAt, deadline!),
+          latestDeparture: toOption(windowEnd),
+        },
+      });
+    },
+  };
+}
 
-  // Leaving now misses the deadline: take the earliest wait that makes it,
-  // or say how late the user will be.
-  if (deadline && !arrivesInTime(leaveNow)) {
-    const onTime = feasible.find(waitAllowed);
-    if (onTime) {
-      return verdict(
-        onTime,
-        `Leaving now would make you late. Waiting ` +
-          `${plural(timing(onTime).wait, 'minute')} gets you there on time.`,
-      );
-    }
-    const lateBy = minutesBetween(deadline, leaveNow.arriveAt);
-    return verdict(
-      leaveNow,
-      `Leave now, you may be late by about ${plural(lateBy, 'minute')}.`,
-      { lateByMinutes: lateBy },
-    );
-  }
+/** One rule of the decision: an answer, or undefined to try the next rule. */
+type Step = (d: Decision) => Verdict | undefined;
 
-  // A deadline past the end of the forecast cannot be planned yet. Saying
-  // "leave now" would be wrong, since there is no reason to go early, so say
-  // that there is no rush and when a plan will be possible.
-  if (
-    deadline &&
-    !latest &&
-    arrivesInTime(leaveNow) &&
-    minutesBetween(now, deadline) > HORIZON_MINUTES
-  ) {
-    const planAfter = Math.max(
-      0,
-      minutesBetween(now, deadline) - MAX_PLAN_MINUTES - leaveNow.driveMinutes,
-    );
-    return buildVerdict(
-      now,
-      leaveNow,
-      leaveNow,
-      `Your deadline is ${duration(minutesBetween(now, deadline))} away, ` +
-        `too far ahead to plan a departure. There is no need to leave yet. ` +
-        `A plan will appear once the deadline is within ${duration(
-          MAX_PLAN_MINUTES,
-        )}, in about ${duration(planAfter)}.`,
-      { action: 'no_rush', notes: [] },
-    );
-  }
-
-  // A deadline beyond the usual forecast is a question of when to leave, not
-  // whether to wait a little, so the answer is a departure time, however far
-  // off. The wait limit does not apply; the leave-by time still does.
-  if (
-    deadline &&
-    latest &&
-    arrivesInTime(leaveNow) &&
-    minutesBetween(now, deadline) > HORIZON_MINUTES
-  ) {
-    const early = slots
-      .slice(1)
-      .filter(s => minutesBetween(s.arriveAt, deadline) >= PLAN_BUFFER_MINUTES);
-    const options = early.filter(departsInTime);
-    const planned = planFor(
-      options,
-      leaveNow,
-      minSavingsMinutes,
-      preferences.goal,
-    );
-    // The least-driving goal found nothing that saves enough, but waiting
-    // would save a little: leaving now is not better, so say there is no rush
-    // and give the window rather than "Leave now".
-    const quietest = options.length
-      ? Math.min(...options.map(s => s.driveMinutes))
-      : undefined;
-    const bestSaving =
-      quietest === undefined ? 0 : leaveNow.driveMinutes - quietest;
-    if (!planned && bestSaving > 0) {
-      return noRush(
-        `Waiting would save at most ${plural(bestSaving, 'minute')} of ` +
-          `driving, under your ${plural(minSavingsMinutes, 'minute')} ` +
-          `minimum, so when you leave hardly matters. Your deadline is ` +
-          `${duration(minutesBetween(now, deadline))} away, so there is no ` +
-          `need to leave yet.`,
-        latest,
-      );
-    }
-    if (planned) {
-      const wait = timing(planned).wait;
-      const room = minutesBetween(planned.arriveAt, deadline);
-      const held =
-        leaveBy &&
-        preferences.goal !== 'minimize_time' &&
-        planned !== early[early.length - 1];
-      const reason =
-        preferences.goal === 'minimize_time'
-          ? `Traffic is lightest if you leave in ${duration(wait)}: ` +
-            `${plural(planned.driveMinutes, 'minute')} of driving instead ` +
-            `of ${leaveNow.driveMinutes}.`
-          : `Your deadline is ${duration(minutesBetween(now, deadline))} ` +
-            `away, so there is no rush. Leaving in ${duration(wait)} still ` +
-            `gets you there with ${duration(room)} to spare.` +
-            (held ? ' That is as late as your leave-by time allows.' : '');
-      return verdict(planned, reason, { action: 'leave_later' });
-    }
-  }
-
-  // An Arrive by goal with no deadline to check against trades time saved
-  // against arriving later. With a deadline, or for least driving, the goal
-  // is just the most time saved, among departures that still arrive in time.
-  const weighsDelay = preferences.goal === 'arrive_by' && !deadline;
+/**
+ * The best slot among a pool worth waiting for. An Arrive by goal with no
+ * deadline to check against trades time saved against arriving later. With a
+ * deadline, or for least driving, the goal is just the most time saved,
+ * among departures that still arrive in time.
+ */
+function bestOf(
+  d: Decision,
+  pool: SlotPrediction[],
+): SlotPrediction | undefined {
+  const weighsDelay = d.preferences.goal === 'arrive_by' && !d.deadline;
   const score = (slot: SlotPrediction) => {
-    const { saved, delay } = timing(slot);
-    return weighsDelay ? saved - BALANCE_DELAY_WEIGHT * delay : saved;
+    const { saved, delay } = d.timing(slot);
+    return weighsDelay ? saved - ARRIVAL_DELAY_WEIGHT * delay : saved;
   };
   const worthWaiting = (slot: SlotPrediction) => {
-    const { saved } = timing(slot);
-    return saved > 0 && saved >= minSavingsMinutes && score(slot) > 0;
+    const { saved } = d.timing(slot);
+    return saved > 0 && saved >= d.minSavingsMinutes && score(slot) > 0;
   };
-  const bestOf = (pool: SlotPrediction[]) =>
-    pool
-      .filter(worthWaiting)
-      .reduce<SlotPrediction | undefined>(
-        (top, slot) => (!top || score(slot) > score(top) ? slot : top),
-        undefined,
-      );
+  return pool
+    .filter(worthWaiting)
+    .reduce<SlotPrediction | undefined>(
+      (top, slot) => (!top || score(slot) > score(top) ? slot : top),
+      undefined,
+    );
+}
 
-  const chosen = bestOf(feasible.filter(waitAllowed));
-  if (chosen) {
-    return verdict(chosen, waitReason(timing(chosen)));
+/**
+ * Leaving now misses the deadline: take the earliest wait that makes it, or
+ * say how late the user will be.
+ */
+const missesDeadline: Step = d => {
+  const { deadline, leaveNow } = d;
+  if (!deadline || d.arrivesInTime(leaveNow)) {
+    return undefined;
   }
-  if (leaveBy && bestOf(feasible.filter(withinMaxWait))) {
-    return verdict(
-      leaveNow,
+  const onTime = d.feasible.find(d.waitAllowed);
+  if (onTime) {
+    return d.verdict(
+      onTime,
+      `Leaving now would make you late. Waiting ` +
+        `${plural(d.timing(onTime).wait, 'minute')} gets you there on time.`,
+    );
+  }
+  const lateBy = minutesBetween(deadline, leaveNow.arriveAt);
+  return d.verdict(
+    leaveNow,
+    `Leave now, you may be late by about ${plural(lateBy, 'minute')}.`,
+    { lateByMinutes: lateBy },
+  );
+};
+
+/**
+ * A deadline past the end of the forecast cannot be planned yet. Saying
+ * "leave now" would be wrong, since there is no reason to go early, so say
+ * that there is no rush and when a plan will be possible.
+ */
+const deadlineTooFar: Step = d => {
+  const { now, deadline, leaveNow } = d;
+  if (
+    !deadline ||
+    d.latest ||
+    !d.arrivesInTime(leaveNow) ||
+    minutesBetween(now, deadline) <= HORIZON_MINUTES
+  ) {
+    return undefined;
+  }
+  const planAfter = Math.max(
+    0,
+    minutesBetween(now, deadline) - MAX_PLAN_MINUTES - leaveNow.driveMinutes,
+  );
+  return buildVerdict(
+    now,
+    leaveNow,
+    leaveNow,
+    `Your deadline is ${duration(minutesBetween(now, deadline))} away, ` +
+      `too far ahead to plan a departure. There is no need to leave yet. ` +
+      `A plan will appear once the deadline is within ${duration(
+        MAX_PLAN_MINUTES,
+      )}, in about ${duration(planAfter)}.`,
+    { action: 'no_rush', notes: [] },
+  );
+};
+
+/**
+ * A deadline beyond the usual forecast is a question of when to leave, not
+ * whether to wait a little, so the answer is a departure time, however far
+ * off. The wait limit does not apply; the leave-by time still does.
+ */
+const plannedDeparture: Step = d => {
+  const { now, deadline, leaveNow, latest, leaveBy, minSavingsMinutes } = d;
+  if (
+    !deadline ||
+    !latest ||
+    !d.arrivesInTime(leaveNow) ||
+    minutesBetween(now, deadline) <= HORIZON_MINUTES
+  ) {
+    return undefined;
+  }
+  const goal = d.preferences.goal;
+  const early = d.slots
+    .slice(1)
+    .filter(s => minutesBetween(s.arriveAt, deadline) >= PLAN_BUFFER_MINUTES);
+  const options = early.filter(d.departsInTime);
+  const planned = planFor(options, leaveNow, minSavingsMinutes, goal);
+
+  if (planned) {
+    const wait = d.timing(planned).wait;
+    const room = minutesBetween(planned.arriveAt, deadline);
+    const held =
+      leaveBy &&
+      goal !== 'minimize_time' &&
+      planned !== early[early.length - 1];
+    const reason =
+      goal === 'minimize_time'
+        ? `Traffic is lightest if you leave in ${duration(wait)}: ` +
+          `${plural(planned.driveMinutes, 'minute')} of driving instead ` +
+          `of ${leaveNow.driveMinutes}.`
+        : `Your deadline is ${duration(minutesBetween(now, deadline))} ` +
+          `away, so there is no rush. Leaving in ${duration(wait)} still ` +
+          `gets you there with ${duration(room)} to spare.` +
+          (held ? ' That is as late as your leave-by time allows.' : '');
+    return d.verdict(planned, reason, { action: 'leave_later' });
+  }
+
+  // The least-driving goal found nothing that saves enough, but waiting would
+  // save a little: leaving now is not better, so say there is no rush and
+  // give the window rather than "Leave now".
+  const quietest = options.length
+    ? Math.min(...options.map(s => s.driveMinutes))
+    : undefined;
+  const bestSaving =
+    quietest === undefined ? 0 : leaveNow.driveMinutes - quietest;
+  if (bestSaving > 0) {
+    return d.noRush(
+      `Waiting would save at most ${plural(bestSaving, 'minute')} of ` +
+        `driving, under your ${plural(minSavingsMinutes, 'minute')} ` +
+        `minimum, so when you leave hardly matters. Your deadline is ` +
+        `${duration(minutesBetween(now, deadline))} away, so there is no ` +
+        `need to leave yet.`,
+      latest,
+    );
+  }
+  return undefined;
+};
+
+/** The best wait that is allowed and saves enough. */
+const bestWait: Step = d => {
+  const chosen = bestOf(d, d.feasible.filter(d.waitAllowed));
+  return chosen ? d.verdict(chosen, waitReason(d.timing(chosen))) : undefined;
+};
+
+/** A wait would help, but the user's own limits rule it out. */
+const waitBlocked: Step = d => {
+  if (d.leaveBy && bestOf(d, d.feasible.filter(d.withinMaxWait))) {
+    return d.verdict(
+      d.leaveNow,
       'Waiting longer would save more, but that is past your leave-by time.',
     );
   }
-  if (maxWaitMinutes !== undefined && bestOf(feasible)) {
-    return verdict(
-      leaveNow,
-      `Waiting longer than your ${plural(maxWaitMinutes, 'minute')} maximum ` +
-        'would help, but no shorter wait saves enough.',
+  if (d.maxWaitMinutes !== undefined && bestOf(d, d.feasible)) {
+    return d.verdict(
+      d.leaveNow,
+      `Waiting longer than your ${plural(d.maxWaitMinutes, 'minute')} ` +
+        'maximum would help, but no shorter wait saves enough.',
     );
   }
-  // Steady traffic and a deadline with room to spare: leaving now is not
-  // better than leaving later, so say there is no rush and give the window.
-  const windowEnd =
-    latest && leaveBy && leaveBy.getTime() < latest.departAt.getTime()
-      ? undefined
-      : latest;
-  const slack = windowEnd ? minutesBetween(now, windowEnd.departAt) : 0;
-  // Leaving later must not cost noticeably more driving, or leaving now wins.
-  const worstLater = windowEnd
-    ? Math.max(
-        ...slots
-          .filter(s => s.departAt.getTime() <= windowEnd.departAt.getTime())
-          .map(s => s.driveMinutes),
-      )
-    : leaveNow.driveMinutes;
-  const heavierLater = worstLater - leaveNow.driveMinutes;
+  return undefined;
+};
+
+/**
+ * With a deadline, the time left before the latest departure, and how much
+ * heavier traffic gets over it. Undefined without a deadline, or when a
+ * leave-by time cuts the window short.
+ */
+function leaveWindow(d: Decision) {
+  const { now, deadline, latest, leaveBy, leaveNow } = d;
   if (
-    deadline &&
-    windowEnd &&
-    slack >= NO_RUSH_SLACK_MINUTES &&
-    heavierLater < minSavingsMinutes
+    !deadline ||
+    !latest ||
+    (leaveBy && leaveBy.getTime() < latest.departAt.getTime())
   ) {
-    return noRush(
-      `Traffic is steady, so waiting will not cut your driving much. ` +
-        `You have ${duration(slack)} before you need to leave to make your ` +
-        `deadline, so there is no need to go yet.`,
-      windowEnd,
-    );
+    return undefined;
   }
-  if (deadline && windowEnd && heavierLater >= minSavingsMinutes) {
-    return verdict(
-      leaveNow,
-      `Traffic builds later, up to ${plural(worstLater, 'minute')} of ` +
-        `driving instead of ${leaveNow.driveMinutes}, so leaving now is best.`,
-    );
+  const worstLater = Math.max(
+    ...d.slots
+      .filter(s => s.departAt.getTime() <= latest.departAt.getTime())
+      .map(s => s.driveMinutes),
+  );
+  return {
+    windowEnd: latest,
+    slack: minutesBetween(now, latest.departAt),
+    worstLater,
+    heavierLater: worstLater - leaveNow.driveMinutes,
+  };
+}
+
+/**
+ * Steady traffic and a deadline with room to spare: leaving now is not
+ * better than leaving later, so say there is no rush and give the window.
+ */
+const steadyTraffic: Step = d => {
+  const window = leaveWindow(d);
+  if (
+    !window ||
+    window.slack < NO_RUSH_SLACK_MINUTES ||
+    window.heavierLater >= d.minSavingsMinutes
+  ) {
+    return undefined;
+  }
+  return d.noRush(
+    `Traffic is steady, so waiting will not cut your driving much. ` +
+      `You have ${duration(window.slack)} before you need to leave to make ` +
+      `your deadline, so there is no need to go yet.`,
+    window.windowEnd,
+  );
+};
+
+/** Traffic gets noticeably heavier before the deadline: go now. */
+const trafficBuilds: Step = d => {
+  const window = leaveWindow(d);
+  if (!window || window.heavierLater < d.minSavingsMinutes) {
+    return undefined;
+  }
+  return d.verdict(
+    d.leaveNow,
+    `Traffic builds later, up to ${plural(window.worstLater, 'minute')} of ` +
+      `driving instead of ${d.leaveNow.driveMinutes}, so leaving now is best.`,
+  );
+};
+
+/** The rules, tried in order. The first that has an answer wins. */
+const STEPS: Step[] = [
+  missesDeadline,
+  deadlineTooFar,
+  plannedDeparture,
+  bestWait,
+  waitBlocked,
+  steadyTraffic,
+  trafficBuilds,
+];
+
+/**
+ * Turns predicted slots (slot 0 is "leave now") and the user's preferences
+ * into a stay-or-go answer. Pure: no clock, network or storage access.
+ */
+export function decide(slots: SlotPrediction[], request: TripRequest): Verdict {
+  const d = decisionFor(slots, request);
+  for (const step of STEPS) {
+    const answer = step(d);
+    if (answer) {
+      return answer;
+    }
   }
   const hours = Math.round(
-    minutesBetween(now, slots[slots.length - 1].departAt) / 60,
+    minutesBetween(d.now, slots[slots.length - 1].departAt) / 60,
   );
-  return verdict(
-    leaveNow,
+  return d.verdict(
+    d.leaveNow,
     `Traffic won't improve much in the next ${plural(hours, 'hour')}.`,
   );
 }

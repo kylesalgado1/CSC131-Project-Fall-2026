@@ -1,4 +1,3 @@
-import React from 'react';
 import ReactTestRenderer, { act } from 'react-test-renderer';
 import { sampleResponse, SampleKind } from '../../samples';
 import { allText, hasText, press } from '../../testing';

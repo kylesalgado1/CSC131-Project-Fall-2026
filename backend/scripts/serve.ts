@@ -17,7 +17,8 @@ import { loadCampusBreaks } from '../config/campusBreaks';
 import { databaseFromEnv } from '../db/pool';
 import { CompositePlaceSearch } from '../places/compositePlaces';
 import { PhotonPlaces } from '../places/photonPlaces';
-import { CachedPlaceSearch, TomTomPlaces } from '../places/tomtomPlaces';
+import { CachedPlaceSearch } from '../places/cachedPlaces';
+import { TomTomPlaces } from '../places/tomtomPlaces';
 import { PlaceSearch } from '../places/types';
 import { PredictionProviders } from '../prediction/predict';
 import {

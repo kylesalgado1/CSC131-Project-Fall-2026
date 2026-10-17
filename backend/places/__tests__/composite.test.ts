@@ -1,5 +1,5 @@
 import { CompositePlaceSearch } from '../compositePlaces';
-import { CachedPlaceSearch } from '../tomtomPlaces';
+import { CachedPlaceSearch } from '../cachedPlaces';
 import { Place, PlaceSearch, SearchError } from '../types';
 
 const place = (id: string, name: string, lat: number, lng: number): Place => ({

@@ -1,13 +1,11 @@
 import { useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { dateKey, dayName, longDay } from '../lib/calendarDays';
 import {
   ClockTime,
-  dateKey,
-  dayName,
   formatClockTime,
   fromWheels,
-  longDay,
   MINUTE_STEP,
   resolveTime,
   toWheels,

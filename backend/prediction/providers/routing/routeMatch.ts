@@ -1,9 +1,11 @@
-import { metersToMiles, milesToMeters } from '../../../util/geo';
+import {
+  metersToMiles,
+  milesToMeters,
+  Point,
+  projectorAround,
+} from '../../../util/geo';
 import { LatLng } from '../../types';
 import { PemsStation, ResolvedRoute } from '../pems/types';
-
-const METERS_PER_DEG_LAT = 110_574;
-const METERS_PER_DEG_LNG_AT_EQUATOR = 111_320;
 
 export interface MatchOptions {
   /** A station further than this from the route path is not on it. */
@@ -23,11 +25,6 @@ export interface MatchOptions {
 /** Compass bearing in degrees of each direction of travel PeMS uses. */
 const BEARING: Record<string, number> = { N: 0, E: 90, S: 180, W: 270 };
 
-interface Point {
-  x: number;
-  y: number;
-}
-
 export interface Hit {
   station: PemsStation;
   /** Meters along the route path to the closest point. */
@@ -38,19 +35,6 @@ const angleDiff = (a: number, b: number): number => {
   const d = Math.abs(a - b) % 360;
   return d > 180 ? 360 - d : d;
 };
-
-/**
- * Flat-earth projection to meters around a starting point: accurate to well
- * under 1% over a 100 mile trip, and cheap.
- */
-function projectorAround(origin: LatLng): (p: LatLng) => Point {
-  const metersPerDegLng =
-    METERS_PER_DEG_LNG_AT_EQUATOR * Math.cos((origin.lat * Math.PI) / 180);
-  return p => ({
-    x: (p.lng - origin.lng) * metersPerDegLng,
-    y: (p.lat - origin.lat) * METERS_PER_DEG_LAT,
-  });
-}
 
 /** Distance in meters from the start of the path to each of its points. */
 function cumulativeDistances(points: Point[]): number[] {
@@ -117,19 +101,6 @@ function closestApproach(point: Point, path: Point[], along: number[]) {
 
 /** Compass bearing in degrees of each direction of travel PeMS and TomTom use. */
 export const COMPASS_BEARING: Record<string, number> = BEARING;
-
-/** Straight-line distance in meters between two points. */
-export function distanceMeters(a: LatLng, b: LatLng): number {
-  const project = projectorAround(a);
-  const { x, y } = project(b);
-  return Math.hypot(x, y);
-}
-
-/** The compass bearing in degrees (0 is north, 90 east) from one point to another. */
-export function bearingDegrees(from: LatLng, to: LatLng): number {
-  const { x, y } = projectorAround(from)(to);
-  return ((Math.atan2(x, y) * 180) / Math.PI + 360) % 360;
-}
 
 /**
  * A test for whether a set of points (an incident, say) lies within a given
