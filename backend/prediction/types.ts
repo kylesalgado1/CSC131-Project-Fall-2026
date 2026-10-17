@@ -100,8 +100,9 @@ export interface Verdict {
   /**
    * `leave_later` is for a deadline far enough off that the answer is a
    * departure time rather than a short wait. `no_rush` is for a deadline
-   * beyond what can be planned yet: there is nothing to recommend, and
-   * `recommended` just repeats `leaveNow`.
+   * where there is nothing to recommend, either because it is beyond what can
+   * be planned yet or because waiting would save too little driving to
+   * matter. `recommended` just repeats `leaveNow`.
    */
   action: 'leave_now' | 'wait' | 'leave_later' | 'no_rush';
   /** 0 when action is leave_now. */

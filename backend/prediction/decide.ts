@@ -275,6 +275,35 @@ export function decide(slots: SlotPrediction[], request: TripRequest): Verdict {
       minSavingsMinutes,
       preferences.goal,
     );
+    // The least-driving goal found nothing that saves enough, but waiting
+    // would save a little: leaving now is not better, so say there is no rush
+    // and give the window rather than "Leave now".
+    const quietest = options.length
+      ? Math.min(...options.map(s => s.driveMinutes))
+      : undefined;
+    const bestSaving =
+      quietest === undefined ? 0 : leaveNow.driveMinutes - quietest;
+    if (!planned && bestSaving > 0) {
+      return buildVerdict(
+        now,
+        leaveNow,
+        leaveNow,
+        `Waiting would save at most ${plural(bestSaving, 'minute')} of ` +
+          `driving, under your ${plural(minSavingsMinutes, 'minute')} ` +
+          `minimum, so when you leave hardly matters. Your deadline is ` +
+          `${duration(minutesBetween(now, deadline))} away, so there is no ` +
+          `need to leave yet.`,
+        {
+          action: 'no_rush',
+          notes: [],
+          deadline: {
+            arriveBy: deadline,
+            marginMinutes: minutesBetween(leaveNow.arriveAt, deadline),
+            latestDeparture: toOption(latest),
+          },
+        },
+      );
+    }
     if (planned) {
       const wait = timing(planned).wait;
       const room = minutesBetween(planned.arriveAt, deadline);
