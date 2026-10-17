@@ -29,7 +29,7 @@ Expo Go can't run everything. Remote push notifications and background location 
 
 The app's main screen asks the backend whether to leave now or wait, and shows the answer with both choices, the arrival times, how sure the app is, and any heads-up such as rain.
 
-1. **Start the backend** in one terminal: `cd backend && npm run serve`. It needs `backend/.env` (see Backend below). With `TOMTOM_API_KEY` set it uses live TomTom traffic and place search; without it, PeMS data only and no search.
+1. **Start the backend** in one terminal: `cd backend && npm run serve`. It needs `backend/.env` (see Backend below). With `TOMTOM_API_KEY` set it uses live TomTom traffic and adds TomTom to place search; without it, PeMS data only, and place search still works through Photon.
 2. **Start the app** in another terminal: `npm start`, then scan the QR code with Expo Go. Your phone and computer must be on the same Wi-Fi.
 
 The app finds the backend at the same address Expo loaded it from, on port 3000. If that does not work (a tunnel, or a firewall), give it the address directly: `EXPO_PUBLIC_API_URL=http://YOUR-COMPUTER-IP:3000 npm start`. Your computer may ask to allow incoming connections for Node the first time.
@@ -116,7 +116,7 @@ cd backend && npm run rebuild-profiles -- --min-observed 0
 
 ### Location and privacy
 
-A trip that starts at the current location sends the phone's coordinates to our backend in each verdict request, and TomTom receives them as part of the route request. The server does not log requests or coordinates and stores nothing about them. Place search sends the typed text, and a rough position to rank nearby places first, to TomTom through the backend. Location permission is asked for only while the app is open ("when in use"), and the app never reads location in the background.
+A trip that starts at the current location sends the phone's coordinates to our backend in each verdict request, and TomTom receives them as part of the route request. The server does not log requests or coordinates and stores nothing about them. Place search sends the typed text, and a rough position to rank nearby places first, to TomTom and to Photon (a search engine over OpenStreetMap data, run by komoot) through the backend. Set `PLACE_SEARCH_PHOTON=off` to keep search on TomTom only, or `PHOTON_URL` to use a Photon server you host. Location permission is asked for only while the app is open ("when in use"), and the app never reads location in the background.
 
 ### Tests and checks
 
@@ -146,7 +146,7 @@ cd backend && npm run serve    # PORT defaults to 3000
 
 `POST /verdict` takes a trip and returns the stay-or-go verdict plus the 13 departure slots behind it (15-minute steps over 3 hours). `GET /health` reports ok.
 
-`GET /places?q=sac&lat=38.2&lng=-122.0` returns up to 5 places matching text being typed (at least 2 characters), closest to `lat`/`lng` first. Give both `lat` and `lng`, or neither. It uses TomTom's search, so the key stays on the server. It returns 503 `search_unavailable` when TomTom is not set up, and 502 when TomTom fails. Results are kept in memory for 10 minutes and never stored.
+`GET /places?q=sac&lat=38.2&lng=-122.0` returns up to 5 places matching text being typed (at least 2 characters), closest to `lat`/`lng` first. Give both `lat` and `lng`, or neither. Short and informal names are matched first from a built-in list of campuses, stadiums and airports ("csus", "sac state", "ucla", "sofi" and so on, in `backend/places/aliases.ts`), then results from TomTom and Photon are merged, taking turns so neither crowds out the other and dropping repeats of the same place. The key stays on the server. A source that fails is skipped; the endpoint returns 502 only when every source fails and the text is not a known name. Results are kept in memory for 10 minutes and never stored. Photon's public server asks for fair use, and its results are credited to OpenStreetMap contributors under the results in the app.
 
 ```sh
 curl -X POST localhost:3000/verdict -H 'content-type: application/json' -d '{

@@ -15,7 +15,10 @@
 import { buildServer } from '../api/server';
 import { loadCampusBreaks } from '../config/campusBreaks';
 import { databaseFromEnv } from '../db/pool';
+import { CompositePlaceSearch } from '../places/compositePlaces';
+import { PhotonPlaces } from '../places/photonPlaces';
 import { CachedPlaceSearch, TomTomPlaces } from '../places/tomtomPlaces';
+import { PlaceSearch } from '../places/types';
 import { PredictionProviders } from '../prediction/predict';
 import {
   FallbackBaselineProvider,
@@ -57,9 +60,15 @@ async function main() {
   const tomtom = client
     ? new TomTomTraffic(client, { campusBreaks })
     : undefined;
-  const places = client
-    ? new CachedPlaceSearch(new TomTomPlaces(client))
-    : undefined;
+  // Place search needs no key: Photon (OpenStreetMap) is always on unless
+  // PLACE_SEARCH_PHOTON=off, and TomTom joins it when there is a key.
+  const placeSources: PlaceSearch[] = [
+    ...(client ? [new TomTomPlaces(client)] : []),
+    ...(process.env.PLACE_SEARCH_PHOTON === 'off'
+      ? []
+      : [new PhotonPlaces(process.env.PHOTON_URL)]),
+  ];
+  const places = new CachedPlaceSearch(new CompositePlaceSearch(placeSources));
   const pems = new PemsBaselineProvider(
     new PgProfileStore(db),
     new PathRouteResolver(

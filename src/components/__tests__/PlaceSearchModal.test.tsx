@@ -145,6 +145,21 @@ describe('PlaceSearchModal while typing', () => {
     expect(hasText(root, 'Type at least 3 letters')).toBe(false);
   });
 
+  it('credits OpenStreetMap under the results, and only when there are results', async () => {
+    const withResults = backend(() => [place('1', 'A result')]);
+    const a = open({ fetchFn: withResults.fetchFn });
+    typeInto(a.root, FIELD, 'abc');
+    await flush(400);
+    expect(hasText(a.root, '© OpenStreetMap contributors')).toBe(true);
+
+    const none = backend(() => []);
+    const b = open({ fetchFn: none.fetchFn });
+    typeInto(b.root, FIELD, 'abc');
+    await flush(400);
+    expect(hasText(b.root, 'OpenStreetMap')).toBe(false);
+    expect(hasText(open().root, 'OpenStreetMap')).toBe(false);
+  });
+
   it('hands back the place that was tapped', async () => {
     const api = backend(() => [
       place('1', 'California State University, Sacramento'),
