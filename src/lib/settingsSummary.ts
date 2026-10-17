@@ -11,7 +11,9 @@ const GOAL_LABEL = {
 export function summarizeSettings(settings: VerdictSettings): string {
   return [
     GOAL_LABEL[settings.goal],
-    `wait up to ${formatDuration(settings.maxWaitMinutes)}`,
+    settings.maxWaitMinutes === undefined
+      ? 'no wait limit'
+      : `wait up to ${formatDuration(settings.maxWaitMinutes)}`,
     `only if it saves ${settings.minSavingsMinutes} min`,
   ].join(' · ');
 }

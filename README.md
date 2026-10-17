@@ -154,11 +154,11 @@ curl -X POST localhost:3000/verdict -H 'content-type: application/json' -d '{
   "destination": {"lat": 38.5593, "lng": -121.4237},
   "arriveBy": "2026-10-21T17:00:00Z",
   "leaveBy": "2026-10-21T16:00:00Z",
-  "preferences": {"goal": "balance", "maxWaitMinutes": 90, "minSavingsMinutes": 10}
+  "preferences": {"goal": "balance", "minSavingsMinutes": 10}
 }'
 ```
 
-`arriveBy`, `leaveBy` and `preferences` are optional. `leaveBy` caps how long the answer may tell you to wait; leaving now is always allowed. `verdict.action` is `leave_now`, `wait` or `leave_later`; with a deadline the verdict also carries `deadline` (`arriveBy`, `marginMinutes` and, when it can be found, `latestDeparture`). A deadline more than 3 hours out makes the response carry more slots. `goal` is `minimize_time`, `arrive_by` or `balance` (default). `maxWaitMinutes` is 15 to 180. The server's clock decides "now"; a `now` in the request is ignored. Dates in the response are ISO 8601 UTC strings.
+`arriveBy`, `leaveBy` and `preferences` are optional. `leaveBy` caps how long the answer may tell you to wait; leaving now is always allowed. `verdict.action` is `leave_now`, `wait` or `leave_later`; with a deadline the verdict also carries `deadline` (`arriveBy`, `marginMinutes` and, when it can be found, `latestDeparture`). A deadline more than 3 hours out makes the response carry more slots. `goal` is `minimize_time`, `arrive_by` or `balance` (default). `maxWaitMinutes` is optional, 15 to 180; leave it out for no limit (the default). The server's clock decides "now"; a `now` in the request is ignored. Dates in the response are ISO 8601 UTC strings.
 
 | Status                    | Meaning                                                           |
 | ------------------------- | ----------------------------------------------------------------- |

@@ -2,9 +2,9 @@ import { DEFAULT_SETTINGS } from '../request';
 import { summarizeSettings } from '../settingsSummary';
 
 describe('summarizeSettings', () => {
-  it('says the goal, the longest wait and the minimum saving', () => {
+  it('says the goal, no wait limit by default, and the minimum saving', () => {
     expect(summarizeSettings(DEFAULT_SETTINGS)).toBe(
-      'Balanced · wait up to 1 hr 30 min · only if it saves 10 min',
+      'Balanced · no wait limit · only if it saves 10 min',
     );
   });
 
