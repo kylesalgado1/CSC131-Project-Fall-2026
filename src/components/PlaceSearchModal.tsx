@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LatLng, Place } from '../api/types';
 import { MIN_QUERY_LENGTH, usePlaceSearch } from '../hooks/usePlaceSearch';
 import { QUICK_PICKS } from '../trip/quickPicks';
+import { OsmAttribution } from './Attribution';
 import { useTheme } from './theme';
 
 interface Props {
@@ -192,6 +193,7 @@ export function PlaceSearchModal({
                   onPress={() => onPick(place)}
                 />
               ))}
+              {search.places.length > 0 ? <OsmAttribution /> : null}
               {!search.loading &&
               !search.error &&
               search.forQuery === typed &&
