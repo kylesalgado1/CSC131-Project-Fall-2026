@@ -97,9 +97,9 @@ describe('buildRequest', () => {
     expect(request).not.toHaveProperty('leaveBy');
   });
 
-  it('has sensible defaults: balanced, 10 minute minimum', () => {
+  it('has sensible defaults: least driving, 10 minute minimum', () => {
     expect(DEFAULT_SETTINGS).toMatchObject({
-      goal: 'balance',
+      goal: 'minimize_time',
       minSavingsMinutes: 10,
     });
   });

@@ -11,8 +11,8 @@ import {
 } from './types';
 
 /**
- * In balance mode a minute of added arrival delay costs this fraction of a
- * minute saved in the car. A wait is only worth it when saved time outweighs
+ * With an Arrive by goal but no deadline, a minute of added arrival delay
+ * costs this fraction of a minute saved in the car. A wait is only worth it when saved time outweighs
  * the weighted delay.
  */
 export const BALANCE_DELAY_WEIGHT = 0.5;
@@ -324,11 +324,10 @@ export function decide(slots: SlotPrediction[], request: TripRequest): Verdict {
     }
   }
 
-  // Balance trades time saved against arriving later; the other goals just
-  // want the most time saved.
-  const weighsDelay =
-    preferences.goal === 'balance' ||
-    (preferences.goal === 'arrive_by' && !deadline);
+  // An Arrive by goal with no deadline to check against trades time saved
+  // against arriving later. With a deadline, or for least driving, the goal
+  // is just the most time saved, among departures that still arrive in time.
+  const weighsDelay = preferences.goal === 'arrive_by' && !deadline;
   const score = (slot: SlotPrediction) => {
     const { saved, delay } = timing(slot);
     return weighsDelay ? saved - BALANCE_DELAY_WEIGHT * delay : saved;

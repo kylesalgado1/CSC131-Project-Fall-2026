@@ -8,7 +8,7 @@ export interface Route {
   destination: LatLng;
 }
 
-export type Goal = 'minimize_time' | 'arrive_by' | 'balance';
+export type Goal = 'minimize_time' | 'arrive_by';
 
 export interface Preferences {
   goal: Goal;
@@ -128,6 +128,6 @@ export interface Verdict {
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
-  goal: 'balance',
+  goal: 'minimize_time',
   minSavingsMinutes: 10,
 };

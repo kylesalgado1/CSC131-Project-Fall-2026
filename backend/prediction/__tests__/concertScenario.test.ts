@@ -196,7 +196,9 @@ function run(
 
 describe('a UCLA student with a concert at SoFi', () => {
   describe('on a typical Friday', () => {
-    const { slots, verdict } = run('Typical Friday traffic');
+    const { slots, verdict } = run('Arrive by goal: typical Friday traffic', {
+      goal: 'arrive_by',
+    });
 
     it('is planned as a departure time, since the concert is hours away', () => {
       expect(verdict.action).toBe('leave_later');
@@ -239,8 +241,8 @@ describe('a UCLA student with a concert at SoFi', () => {
   it('with concert traffic building after 6 PM, leaves earlier', () => {
     // Fans heading to the stadium add about half an hour from 6 PM on.
     const { verdict } = run(
-      'Concert traffic adds 30 minutes after 6 PM',
-      {},
+      'Arrive by goal: concert traffic adds 30 minutes after 6 PM',
+      { goal: 'arrive_by' },
       hour => (hour >= 18 ? 30 : 0),
     );
     expect(verdict.action).toBe('leave_later');
@@ -252,16 +254,20 @@ describe('a UCLA student with a concert at SoFi', () => {
   });
 
   it('respects a leave-by time: a student who has to go by 5 PM', () => {
-    const { verdict } = run('Has to be on the road by 5:00 PM', {
-      leaveBy: at(17),
-    });
+    const { verdict } = run(
+      'Arrive by goal: has to be on the road by 5:00 PM',
+      {
+        goal: 'arrive_by',
+        leaveBy: at(17),
+      },
+    );
     expect(verdict.action).toBe('leave_later');
     expect(verdict.recommended.departAt).toEqual(at(17));
     expect(verdict.reason).toMatch(/as late as your leave-by time allows\.$/);
   });
 
   describe('with the least-driving goal', () => {
-    const { verdict } = run('Least driving goal', { goal: 'minimize_time' });
+    const { verdict } = run('Least driving goal (the default)');
 
     it('says there is no rush, not "leave now": waiting saves too little', () => {
       // The quietest road that still arrives with time to spare (7:30 PM, 33

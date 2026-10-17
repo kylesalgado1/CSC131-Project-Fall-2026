@@ -14,7 +14,7 @@ export interface VerdictSettings {
 }
 
 export const DEFAULT_SETTINGS: VerdictSettings = {
-  goal: 'balance',
+  goal: 'minimize_time',
   minSavingsMinutes: 10,
 };
 

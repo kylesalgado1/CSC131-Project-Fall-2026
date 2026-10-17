@@ -2,7 +2,7 @@
  * The shape of the backend's POST /verdict, as it arrives over the wire.
  * Dates are ISO 8601 strings. Keep in step with backend/prediction/types.ts.
  */
-export type Goal = 'minimize_time' | 'arrive_by' | 'balance';
+export type Goal = 'minimize_time' | 'arrive_by';
 export type Confidence = 'High' | 'Medium' | 'Low';
 
 export interface LatLng {

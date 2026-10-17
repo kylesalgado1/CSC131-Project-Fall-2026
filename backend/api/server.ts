@@ -50,7 +50,7 @@ const verdictSchema = {
         type: 'object',
         additionalProperties: false,
         properties: {
-          goal: { enum: ['minimize_time', 'arrive_by', 'balance'] },
+          goal: { enum: ['minimize_time', 'arrive_by'] },
           // Story 6-2: 15 minutes to 3 hours.
           maxWaitMinutes: { type: 'integer', minimum: 15, maximum: 180 },
           minSavingsMinutes: { type: 'integer', minimum: 0, maximum: 180 },

@@ -6,7 +6,6 @@ import { Chip } from './Chip';
 import { useTheme } from './theme';
 
 const GOALS: Array<{ goal: Goal; label: string }> = [
-  { goal: 'balance', label: 'Balanced' },
   { goal: 'minimize_time', label: 'Least driving' },
   { goal: 'arrive_by', label: 'Arrive by' },
 ];

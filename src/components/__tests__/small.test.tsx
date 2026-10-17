@@ -86,12 +86,12 @@ describe('TripCard', () => {
 describe('Collapsible', () => {
   it('is folded away to begin with, showing its summary', () => {
     const root = render(
-      <Collapsible title="Preferences" summary="Balanced · wait up to 1 hr">
+      <Collapsible title="Preferences" summary="Least driving · wait up to 1 hr">
         <></>
       </Collapsible>,
     );
     expect(hasText(root, 'Preferences')).toBe(true);
-    expect(hasText(root, 'Balanced · wait up to 1 hr')).toBe(true);
+    expect(hasText(root, 'Least driving · wait up to 1 hr')).toBe(true);
   });
 
   it('opens and closes, hiding the summary while open', () => {
