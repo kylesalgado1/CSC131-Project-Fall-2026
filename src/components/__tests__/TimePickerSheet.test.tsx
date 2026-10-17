@@ -1,7 +1,6 @@
 import React from 'react';
 import { ScrollView } from 'react-native';
 import ReactTestRenderer, { act } from 'react-test-renderer';
-import { ClockTime } from '../../lib/clockTime';
 import {
   allText,
   hasText,
@@ -50,6 +49,13 @@ function open(over: Partial<Props> = {}) {
       act(() => renderer.update(<TimePickerSheet {...props} {...next} />)),
   };
 }
+
+const labeled = (root: ReactTestRenderer.ReactTestInstance, label: string) =>
+  root.findAll(
+    node =>
+      node.props.accessibilityLabel === label &&
+      typeof node.props.onPress === 'function',
+  )[0];
 
 describe('TimePickerSheet', () => {
   it('has three wheels: hour, minute and AM or PM', () => {
@@ -110,23 +116,115 @@ describe('TimePickerSheet', () => {
     expect(props.onSet).toHaveBeenCalledWith({
       hour: 20,
       minute: 15,
-    } as ClockTime);
+      date: '2026-10-21',
+    });
   });
 
   it('can set a time with no scrolling at all', () => {
     const { root, props } = open({ fallback: { hour: 12, minute: 0 } });
     press(root, 'Set leave by');
-    expect(props.onSet).toHaveBeenCalledWith({ hour: 12, minute: 0 });
+    expect(props.onSet).toHaveBeenCalledWith({
+      hour: 12,
+      minute: 0,
+      date: '2026-10-21',
+    });
   });
 
   it('handles midnight and noon', () => {
     const { root, props } = open({ current: { hour: 1, minute: 0 } });
     pressExact(root, '12');
     press(root, 'Set leave by');
-    expect(props.onSet).toHaveBeenLastCalledWith({ hour: 0, minute: 0 });
+    expect(props.onSet).toHaveBeenLastCalledWith({
+      hour: 0,
+      minute: 0,
+      date: '2026-10-22', // 1:00 AM has passed, so the sheet opens on tomorrow
+    });
     pressExact(root, 'PM');
     press(root, 'Set leave by');
-    expect(props.onSet).toHaveBeenLastCalledWith({ hour: 12, minute: 0 });
+    expect(props.onSet).toHaveBeenLastCalledWith({
+      hour: 12,
+      minute: 0,
+      date: '2026-10-22',
+    });
+  });
+
+  it('shows the day on a row, and opens a calendar when tapped', () => {
+    const { root } = open({ current: { hour: 7, minute: 30 } });
+    expect(hasText(root, 'Wed, Oct 21')).toBe(true);
+    expect(allText(root)).not.toContain('October 2026');
+    press(root, 'Day');
+    expect(hasText(root, 'October 2026')).toBe(true);
+  });
+
+  it('picks a later day from the calendar and goes back to the wheels', () => {
+    const { root, props, wheels } = open({ current: { hour: 7, minute: 30 } });
+    press(root, 'Day');
+    pressLabeled(root, 'Fri, Oct 23');
+    expect(hasText(root, 'October 2026')).toBe(false);
+    expect(hasText(root, '7:30 AM Fri, Oct 23')).toBe(true);
+    expect(wheels).toHaveLength(3);
+    press(root, 'Set leave by');
+    expect(props.onSet).toHaveBeenCalledWith({
+      hour: 7,
+      minute: 30,
+      date: '2026-10-23',
+    });
+  });
+
+  it('opens the calendar on the month already chosen', () => {
+    const { root } = open({
+      current: { hour: 9, minute: 0, date: '2026-12-24' },
+    });
+    expect(hasText(root, 'Thu, Dec 24')).toBe(true);
+    press(root, 'Day');
+    expect(hasText(root, 'December 2026')).toBe(true);
+  });
+
+  it('moves between months, but not before this one or past a year', () => {
+    const { root } = open({ current: { hour: 7, minute: 30 } });
+    press(root, 'Day');
+    expect(labeled(root, 'Previous month').props.disabled).toBe(true);
+    pressLabeled(root, 'Next month');
+    expect(hasText(root, 'November 2026')).toBe(true);
+    pressLabeled(root, 'Previous month');
+    expect(hasText(root, 'October 2026')).toBe(true);
+    for (let i = 0; i < 11; i++) {
+      pressLabeled(root, 'Next month');
+    }
+    expect(hasText(root, 'September 2027')).toBe(true);
+    expect(labeled(root, 'Next month').props.disabled).toBe(true);
+  });
+
+  it('does not let a day before today be chosen', () => {
+    const { root } = open({ current: { hour: 7, minute: 30 } });
+    press(root, 'Day');
+    const yesterday = root.findAll(
+      node => node.props.accessibilityLabel === 'Tue, Oct 20',
+    )[0];
+    expect(yesterday.props.disabled).toBe(true);
+    const today = root.findAll(
+      node => node.props.accessibilityLabel === 'Wed, Oct 21, today',
+    )[0];
+    expect(today.props.disabled).toBeFalsy();
+  });
+
+  it('warns that advice only plans 12 hours ahead for farther times', () => {
+    const { root } = open({ current: { hour: 7, minute: 30 } });
+    expect(allText(root).join(' ')).not.toMatch(/Advice plans up to/);
+    press(root, 'Day');
+    pressLabeled(root, 'Fri, Oct 23');
+    expect(allText(root).join(' ')).toMatch(/Advice plans up to 12 hours/);
+  });
+
+  it('moves a time already past today to tomorrow', () => {
+    const { root, props } = open({ current: { hour: 6, minute: 0 } });
+    expect(hasText(root, '6:00 AM tomorrow')).toBe(true);
+    press(root, 'Set leave by');
+    expect(props.onSet).toHaveBeenCalledWith({
+      hour: 6,
+      minute: 0,
+      date: '2026-10-22',
+    });
   });
 
   it('offers "Any time" only when a time is set, and clears it', () => {

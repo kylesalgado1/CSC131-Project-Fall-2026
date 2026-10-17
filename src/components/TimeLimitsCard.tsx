@@ -46,8 +46,8 @@ function Row({
         >
           {text}
         </Text>
-        {day === 'tomorrow' ? (
-          <Text style={[styles.day, { color: theme.muted }]}>tomorrow</Text>
+        {day && day !== 'today' ? (
+          <Text style={[styles.day, { color: theme.muted }]}>{day}</Text>
         ) : null}
         <Text style={[styles.chevron, { color: theme.muted }]}>›</Text>
       </View>

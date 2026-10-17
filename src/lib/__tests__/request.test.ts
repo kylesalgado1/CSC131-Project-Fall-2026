@@ -35,6 +35,19 @@ describe('buildRequest', () => {
     expect(request.destination).toEqual(destination);
   });
 
+  it('sends the chosen day for a time that has one', () => {
+    const request = buildRequest(
+      origin,
+      destination,
+      {
+        ...DEFAULT_SETTINGS,
+        arriveBy: { hour: 17, minute: 0, date: '2026-10-23' },
+      },
+      now,
+    );
+    expect(request.arriveBy).toBe(new Date(2026, 9, 23, 17, 0).toISOString());
+  });
+
   it('adds the arrive-by and leave-by times as ISO times', () => {
     const request = buildRequest(
       origin,

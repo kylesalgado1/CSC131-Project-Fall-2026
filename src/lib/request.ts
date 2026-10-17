@@ -1,5 +1,5 @@
 import { Goal, LatLng, VerdictRequest } from '../api/types';
-import { ClockTime, nextOccurrence } from './clockTime';
+import { ClockTime, resolveTime } from './clockTime';
 
 export interface VerdictSettings {
   goal: Goal;
@@ -20,8 +20,9 @@ export const DEFAULT_SETTINGS: VerdictSettings = {
 };
 
 /**
- * The request for a trip. A time of day means the next time the clock shows
- * it, worked out fresh each time, so "8:30" keeps meaning the next 8:30.
+ * The request for a trip. A time with a chosen day means that moment. A time
+ * without one means the next time the clock shows it, worked out fresh each
+ * time, so "8:30" keeps meaning the next 8:30.
  */
 export function buildRequest(
   origin: LatLng,
@@ -33,10 +34,8 @@ export function buildRequest(
   return {
     origin: { lat: origin.lat, lng: origin.lng },
     destination: { lat: destination.lat, lng: destination.lng },
-    ...(arriveBy
-      ? { arriveBy: nextOccurrence(arriveBy, now).toISOString() }
-      : {}),
-    ...(leaveBy ? { leaveBy: nextOccurrence(leaveBy, now).toISOString() } : {}),
+    ...(arriveBy ? { arriveBy: resolveTime(arriveBy, now).toISOString() } : {}),
+    ...(leaveBy ? { leaveBy: resolveTime(leaveBy, now).toISOString() } : {}),
     preferences: {
       goal: settings.goal,
       maxWaitMinutes: settings.maxWaitMinutes,
