@@ -390,12 +390,9 @@ describe('the answer', () => {
     expect(api.verdicts[0]).toMatchObject({
       origin: { lat: HOME.lat, lng: HOME.lng },
       destination: { lat: SAC_STATE.lat, lng: SAC_STATE.lng },
-      preferences: {
-        goal: 'balance',
-        maxWaitMinutes: 90,
-        minSavingsMinutes: 10,
-      },
+      preferences: { goal: 'balance', minSavingsMinutes: 10 },
     });
+    expect(api.verdicts[0].preferences).not.toHaveProperty('maxWaitMinutes');
     expect(allText(root)).toContain('Leave now');
     expect(hasText(root, 'Updated')).toBe(true);
     expect(hasText(root, 'refreshes every 5 minutes')).toBe(true);
@@ -414,10 +411,7 @@ describe('the answer', () => {
     await saveTrip(campusTrip);
     const root = await open(backend([sampleResponse('leave_now', START)]));
     expect(
-      hasText(
-        root,
-        'Balanced · wait up to 1 hr 30 min · only if it saves 10 min',
-      ),
+      hasText(root, 'Balanced · no wait limit · only if it saves 10 min'),
     ).toBe(true);
     expect(hasText(root, 'LONGEST I WILL WAIT')).toBe(false);
     press(root, 'Preferences');
@@ -438,6 +432,20 @@ describe('the answer', () => {
       maxWaitMinutes: 60,
       minSavingsMinutes: 5,
     });
+  });
+
+  it('sends a wait limit only when one is chosen, and can go back to none', async () => {
+    await saveTrip(campusTrip);
+    const api = backend([sampleResponse('leave_now', START)]);
+    const root = await open(api);
+    const last = () => api.verdicts[api.verdicts.length - 1].preferences;
+    press(root, 'Preferences');
+    press(root, '1 hr');
+    await flush(600);
+    expect(last()).toMatchObject({ maxWaitMinutes: 60 });
+    press(root, 'No limit');
+    await flush(600);
+    expect(last()).not.toHaveProperty('maxWaitMinutes');
   });
 
   describe('leave-by and arrive-by times', () => {

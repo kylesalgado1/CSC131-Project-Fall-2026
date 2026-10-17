@@ -3,8 +3,8 @@ import { ClockTime, resolveTime } from './clockTime';
 
 export interface VerdictSettings {
   goal: Goal;
-  /** Longest wait the user will accept. */
-  maxWaitMinutes: number;
+  /** Longest wait the user will accept. Absent for no limit. */
+  maxWaitMinutes?: number;
   /** Waiting must save at least this much to be recommended. */
   minSavingsMinutes: number;
   /** The latest time to be there. Absent for no deadline. */
@@ -15,7 +15,6 @@ export interface VerdictSettings {
 
 export const DEFAULT_SETTINGS: VerdictSettings = {
   goal: 'balance',
-  maxWaitMinutes: 90,
   minSavingsMinutes: 10,
 };
 
@@ -38,7 +37,9 @@ export function buildRequest(
     ...(leaveBy ? { leaveBy: resolveTime(leaveBy, now).toISOString() } : {}),
     preferences: {
       goal: settings.goal,
-      maxWaitMinutes: settings.maxWaitMinutes,
+      ...(settings.maxWaitMinutes !== undefined
+        ? { maxWaitMinutes: settings.maxWaitMinutes }
+        : {}),
       minSavingsMinutes: settings.minSavingsMinutes,
     },
   };

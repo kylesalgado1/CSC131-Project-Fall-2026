@@ -56,6 +56,11 @@ export function PreferencesPanel({ settings, onChange }: Props) {
       </Group>
 
       <Group title="LONGEST I WILL WAIT">
+        <Chip
+          label="No limit"
+          selected={settings.maxWaitMinutes === undefined}
+          onPress={() => set({ maxWaitMinutes: undefined })}
+        />
         {MAX_WAITS.map(minutes => (
           <Chip
             key={minutes}

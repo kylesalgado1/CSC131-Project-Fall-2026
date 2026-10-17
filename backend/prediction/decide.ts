@@ -203,7 +203,7 @@ export function decide(slots: SlotPrediction[], request: TripRequest): Verdict {
     };
   };
   const withinMaxWait = (slot: SlotPrediction) =>
-    timing(slot).wait <= maxWaitMinutes;
+    maxWaitMinutes === undefined || timing(slot).wait <= maxWaitMinutes;
   const departsInTime = (slot: SlotPrediction) =>
     !leaveBy || slot.departAt.getTime() <= leaveBy.getTime();
   const waitAllowed = (slot: SlotPrediction) =>
@@ -300,7 +300,7 @@ export function decide(slots: SlotPrediction[], request: TripRequest): Verdict {
       'Waiting longer would save more, but that is past your leave-by time.',
     );
   }
-  if (bestOf(feasible)) {
+  if (maxWaitMinutes !== undefined && bestOf(feasible)) {
     return verdict(
       leaveNow,
       `Waiting longer than your ${plural(maxWaitMinutes, 'minute')} maximum ` +

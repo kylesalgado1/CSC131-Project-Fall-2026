@@ -12,8 +12,8 @@ export type Goal = 'minimize_time' | 'arrive_by' | 'balance';
 
 export interface Preferences {
   goal: Goal;
-  /** Longest wait the user will accept, in minutes. */
-  maxWaitMinutes: number;
+  /** Longest wait the user will accept, in minutes. Absent means no limit. */
+  maxWaitMinutes?: number;
   /** Waiting must save at least this many minutes of drive time. */
   minSavingsMinutes: number;
   /** Optional deadline. When set, no recommendation arrives after it. */
@@ -126,6 +126,5 @@ export interface Verdict {
 
 export const DEFAULT_PREFERENCES: Preferences = {
   goal: 'balance',
-  maxWaitMinutes: 180,
   minSavingsMinutes: 10,
 };

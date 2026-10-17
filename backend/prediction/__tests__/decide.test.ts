@@ -102,6 +102,13 @@ describe('decide', () => {
     expect(v.minutesSaved).toBe(16);
   });
 
+  it('has no wait limit unless one is given', () => {
+    const v = decide(slotsOf(CLEARING), requestWith({ goal: 'minimize_time' }));
+    expect(DEFAULT_PREFERENCES.maxWaitMinutes).toBeUndefined();
+    expect(v.waitMinutes).toBe(75); // waits as long as it takes to clear
+    expect(v.reason).not.toContain('maximum');
+  });
+
   it('explains when only a longer wait would help', () => {
     const v = decide(
       slotsOf(CLEARING),
