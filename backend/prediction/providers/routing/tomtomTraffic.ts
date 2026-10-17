@@ -162,7 +162,7 @@ export class TomTomTraffic
       options.predictionTtlMs ?? 30 * MINUTE_MS,
       now,
     );
-    this.gridMs = (options.gridMinutes ?? 30) * MINUTE_MS;
+    this.gridMs = (options.gridMinutes ?? 60) * MINUTE_MS;
     this.assumedHistoryDays = options.assumedHistoryDays ?? 100;
     this.incidentRadiusMeters = options.incidentRadiusMeters ?? 150;
     this.maxIncidentBoxes = options.maxIncidentBoxes ?? 8;

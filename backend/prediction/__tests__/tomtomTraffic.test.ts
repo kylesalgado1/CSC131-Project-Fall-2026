@@ -189,14 +189,14 @@ describe('TomTomTraffic baselines', () => {
     expect(at0715.minutes).toBeCloseTo(65);
   });
 
-  it("needs only seven requests for a verdict's 13 slots", async () => {
+  it("needs only four requests for a verdict's 13 slots", async () => {
     const { client, calls } = fakeTomTom();
     const results = await new TomTomTraffic(client).getBaselines(
       route,
       slots(NOW),
     );
     expect(results).toHaveLength(13);
-    expect(calls.routing).toBe(7); // 07:00, 07:30, ... 10:00
+    expect(calls.routing).toBe(4); // 07:00, 08:00, 09:00, 10:00
     expect(results[12].minutes).toBeCloseTo(60 + 180 / 3);
   });
 
@@ -206,7 +206,16 @@ describe('TomTomTraffic baselines', () => {
       route,
       slots(addMinutes(NOW, 10)),
     );
-    expect(calls.routing).toBe(8);
+    expect(calls.routing).toBe(5);
+  });
+
+  it('can still use a finer grid when asked', async () => {
+    const { client, calls } = fakeTomTom();
+    await new TomTomTraffic(client, { gridMinutes: 30 }).getBaselines(
+      route,
+      slots(NOW),
+    );
+    expect(calls.routing).toBe(7);
   });
 
   it('sends departure times on the local clock', async () => {
@@ -231,10 +240,25 @@ describe('TomTomTraffic baselines', () => {
     });
     await traffic.getBaselines(route, slots(NOW));
     await traffic.getBaselines(route, slots(NOW));
-    expect(calls.routing).toBe(7);
+    expect(calls.routing).toBe(4);
     clock = 2000;
     await traffic.getBaselines(route, slots(NOW));
-    expect(calls.routing).toBe(14);
+    expect(calls.routing).toBe(8);
+  });
+
+  it('reuses predictions when the start moves a few metres, as a phone position does', async () => {
+    const { client, calls } = fakeTomTom();
+    const traffic = new TomTomTraffic(client);
+    await traffic.getBaselines(route, slots(NOW));
+    const jittered = {
+      ...route,
+      origin: {
+        lat: route.origin.lat + 0.00005,
+        lng: route.origin.lng - 0.00004,
+      },
+    };
+    await traffic.getBaselines(jittered, slots(NOW));
+    expect(calls.routing).toBe(4);
   });
 
   it('reuses predictions for the same weekday and time on another date', async () => {
