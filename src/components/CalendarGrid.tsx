@@ -8,7 +8,7 @@ import {
   monthTitle,
   parseDateKey,
   WEEKDAY_INITIALS,
-} from '../lib/clockTime';
+} from '../lib/calendarDays';
 import { useTheme } from './theme';
 
 interface Props {
@@ -106,10 +106,10 @@ export function CalendarGrid({ selected, today, onSelect }: Props) {
                     styles.day,
                     chosen && { backgroundColor: theme.accent },
                     !chosen &&
-                      cell.key === todayKey && {
-                        borderWidth: 1,
-                        borderColor: theme.accent,
-                      },
+                      cell.key === todayKey && [
+                        styles.today,
+                        { borderColor: theme.accent },
+                      ],
                   ]}
                 >
                   <Text
@@ -168,6 +168,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  today: { borderWidth: 1 },
   dayText: { fontSize: 16 },
   dayChosen: { fontWeight: '700' },
 });

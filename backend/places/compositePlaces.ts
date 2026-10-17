@@ -1,4 +1,4 @@
-import { distanceMeters } from '../prediction/providers/routing/routeMatch';
+import { distanceMeters } from '../util/geo';
 import { LatLng } from '../prediction/types';
 import { matchAliases, normalize } from './aliases';
 import { Place, PlaceSearch, SearchError } from './types';

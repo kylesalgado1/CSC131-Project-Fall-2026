@@ -23,3 +23,6 @@ export function formatTime(
     timeZone: options.timeZone,
   });
 }
+
+/** A number as at least two digits: 5 is "05". */
+export const pad2 = (n: number): string => String(n).padStart(2, '0');

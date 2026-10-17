@@ -1,4 +1,3 @@
-import React from 'react';
 import { ScrollView } from 'react-native';
 import ReactTestRenderer, { act } from 'react-test-renderer';
 import { pressExact } from '../../testing';

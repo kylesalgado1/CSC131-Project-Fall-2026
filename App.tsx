@@ -24,13 +24,11 @@ import { Notice } from './src/components/Notice';
 import { PlaceSearchModal } from './src/components/PlaceSearchModal';
 import { PreferencesPanel } from './src/components/PreferencesPanel';
 import { useTheme } from './src/components/theme';
-import { TimeLimitsCard } from './src/components/TimeLimitsCard';
-import { TimePickerSheet } from './src/components/TimePickerSheet';
+import { TimeLimits } from './src/components/TimeLimits';
 import { TripCard } from './src/components/TripCard';
 import { VerdictCard } from './src/components/VerdictCard';
 import { useTrip } from './src/hooks/useTrip';
 import { useVerdict, VerdictSource } from './src/hooks/useVerdict';
-import { ClockTime, suggestedTime } from './src/lib/clockTime';
 import { formatTime } from './src/lib/format';
 import { DEFAULT_SETTINGS, VerdictSettings } from './src/lib/request';
 import { summarizeSettings } from './src/lib/settingsSummary';
@@ -52,14 +50,6 @@ function Screen({ baseUrl = defaultBaseUrl(), fetchFn, locate }: Props) {
   const [source, setSource] = useState<VerdictSource>('live');
   const [settings, setSettings] = useState<VerdictSettings>(DEFAULT_SETTINGS);
   const [picking, setPicking] = useState<'from' | 'to' | undefined>();
-  // Which time the sheet is for, kept after it closes so the title does not
-  // change while the sheet slides away.
-  const [timeField, setTimeField] = useState<'leaveBy' | 'arriveBy'>('leaveBy');
-  const [timeSheetOpen, setTimeSheetOpen] = useState(false);
-  const editTime = (field: 'leaveBy' | 'arriveBy') => {
-    setTimeField(field);
-    setTimeSheetOpen(true);
-  };
   // Where the phone last was, used to rank place search results.
   const [located, setLocated] = useState<LatLng | undefined>();
 
@@ -116,11 +106,12 @@ function Screen({ baseUrl = defaultBaseUrl(), fetchFn, locate }: Props) {
         onSwap={swapped(trip) ? swap : undefined}
       />
 
-      <TimeLimitsCard
+      <TimeLimits
         leaveBy={settings.leaveBy}
         arriveBy={settings.arriveBy}
-        onEditLeaveBy={() => editTime('leaveBy')}
-        onEditArriveBy={() => editTime('arriveBy')}
+        onChange={(field, time) =>
+          setSettings(current => ({ ...current, [field]: time }))
+        }
       />
 
       {!live ? (
@@ -230,27 +221,6 @@ function Screen({ baseUrl = defaultBaseUrl(), fetchFn, locate }: Props) {
           Server: {baseUrl}
         </Text>
       ) : null}
-
-      <TimePickerSheet
-        visible={timeSheetOpen}
-        title={timeField === 'arriveBy' ? 'Arrive by' : 'Leave by'}
-        explanation={
-          timeField === 'arriveBy'
-            ? 'The latest you need to get there. The app will not suggest a plan that arrives later.'
-            : 'The latest you want to be on the road. The app will not tell you to wait past it.'
-        }
-        current={settings[timeField]}
-        fallback={suggestedTime(new Date(), timeField === 'arriveBy' ? 90 : 30)}
-        onSet={(time: ClockTime) => {
-          setSettings(current => ({ ...current, [timeField]: time }));
-          setTimeSheetOpen(false);
-        }}
-        onClear={() => {
-          setSettings(current => ({ ...current, [timeField]: undefined }));
-          setTimeSheetOpen(false);
-        }}
-        onClose={() => setTimeSheetOpen(false)}
-      />
 
       <PlaceSearchModal
         visible={picking !== undefined}

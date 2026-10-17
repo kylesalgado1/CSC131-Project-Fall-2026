@@ -1,3 +1,4 @@
+import { bearingDegrees, distanceMeters } from '../../../util/geo';
 import { MINUTE_MS } from '../../../util/time';
 import { TtlCache } from '../../../util/ttlCache';
 import {
@@ -19,12 +20,7 @@ import {
 import { BaselineProvider } from '../baseline';
 import { LiveConditionsProvider } from '../live';
 import { routeKey } from './routeKey';
-import {
-  bearingDegrees,
-  COMPASS_BEARING,
-  distanceMeters,
-  pathProximity,
-} from './routeMatch';
+import { COMPASS_BEARING, pathProximity } from './routeMatch';
 import {
   BoundingBox,
   TomTomIncident,

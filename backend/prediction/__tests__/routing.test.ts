@@ -6,12 +6,8 @@ import {
   CachedPathProvider,
   OsrmPathProvider,
 } from '../providers/routing/osrm';
-import {
-  bearingDegrees,
-  distanceMeters,
-  matchStations,
-  pathProximity,
-} from '../providers/routing/routeMatch';
+import { matchStations, pathProximity } from '../providers/routing/routeMatch';
+import { bearingDegrees, distanceMeters } from '../../util/geo';
 import { RoutePath, RoutePathProvider } from '../providers/routing/types';
 import { PemsStation } from '../providers/pems/types';
 import { LatLng, Route } from '../types';
