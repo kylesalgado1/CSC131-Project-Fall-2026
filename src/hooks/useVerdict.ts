@@ -10,8 +10,10 @@ import { Trip } from '../trip/types';
 
 /** Story 2-6: recalculate at least this often while the app is open. */
 export const REFRESH_MS = 5 * 60_000;
-/** Wait for typing to settle before asking the server again. */
+/** Wait for quick repeated taps on a preference to settle before asking again. */
 const SETTINGS_DEBOUNCE_MS = 500;
+/** A position this recent is reused when the settings or trip change. */
+export const LOCATION_REUSE_MS = 60_000;
 
 export type VerdictSource = 'live' | SampleKind;
 
@@ -74,6 +76,9 @@ export function useVerdict(input: UseVerdictInput): VerdictState & {
   const requestId = useRef(0);
   const previous = useRef<Verdict | undefined>(undefined);
   const updatedAt = useRef<Date | undefined>(undefined);
+  const lastFix = useRef<{ position: LatLng; at: number } | undefined>(
+    undefined,
+  );
   const [state, setState] = useState<VerdictState>(STARTING);
 
   const load = useCallback(async (reason: 'change' | 'refresh') => {
@@ -92,9 +97,20 @@ export function useVerdict(input: UseVerdictInput): VerdictState & {
       if (current.source === 'live') {
         const { from } = current.trip;
         let origin: LatLng;
-        if (from.kind === 'current') {
+        const fix = lastFix.current;
+        if (
+          from.kind === 'current' &&
+          reason === 'change' &&
+          fix &&
+          asked.getTime() - fix.at < LOCATION_REUSE_MS
+        ) {
+          // Changing a setting does not move the phone, so skip the wait for
+          // a new position. A refresh still asks, so the answer follows the user.
+          origin = fix.position;
+        } else if (from.kind === 'current') {
           setState(s => ({ ...s, locating: true }));
           origin = await locate();
+          lastFix.current = { position: origin, at: now().getTime() };
           current.onLocated?.(origin);
           if (id !== requestId.current) {
             return;
@@ -142,20 +158,30 @@ export function useVerdict(input: UseVerdictInput): VerdictState & {
     }
   }, []);
 
-  // A new trip, source or setting starts over, so the old answer and the
-  // "advice changed" comparison do not carry across.
+  // A new trip or source starts over. A new setting keeps the old answer on
+  // screen, marked as refreshing, until the new one arrives. Either way the
+  // "advice changed" comparison does not carry across.
   const hasDestination = Boolean(trip.to);
   const waiting = source === 'live' && !hasDestination;
   const tripKey = trip.from.kind === 'current' ? 'current' : trip.from.place.id;
   const settingsKey = JSON.stringify([source, tripKey, trip.to?.id, settings]);
   // Picking a place or a source is a single tap and should answer at once.
-  // Only edits to the settings wait, so typing an "arrive by" time does not
-  // ask the server after every character.
+  // So is setting or clearing Leave by or Arrive by, which comes from a sheet.
+  // Only edits to the other preferences wait, so quick repeated taps do not
+  // ask the server every time.
   const choiceKey = JSON.stringify([source, tripKey, trip.to?.id]);
+  const instantKey = JSON.stringify([
+    choiceKey,
+    settings.leaveBy,
+    settings.arriveBy,
+  ]);
   const lastChoice = useRef<string | undefined>(undefined);
+  const lastInstant = useRef<string | undefined>(undefined);
   useEffect(() => {
-    const delay = lastChoice.current === choiceKey ? SETTINGS_DEBOUNCE_MS : 0;
+    const delay = lastInstant.current === instantKey ? SETTINGS_DEBOUNCE_MS : 0;
+    const sameTrip = lastChoice.current === choiceKey;
     lastChoice.current = choiceKey;
+    lastInstant.current = instantKey;
     previous.current = undefined;
     updatedAt.current = undefined;
     requestId.current += 1; // forget anything still on its way
@@ -163,10 +189,14 @@ export function useVerdict(input: UseVerdictInput): VerdictState & {
       setState(IDLE);
       return undefined;
     }
-    setState(STARTING);
+    setState(s =>
+      sameTrip && s.response
+        ? { ...s, loading: false, refreshing: true, error: undefined }
+        : STARTING,
+    );
     const timer = setTimeout(() => load('change'), delay);
     return () => clearTimeout(timer);
-  }, [settingsKey, choiceKey, waiting, load]);
+  }, [settingsKey, choiceKey, instantKey, waiting, load]);
 
   useEffect(() => {
     if (source !== 'live' || !hasDestination) {
