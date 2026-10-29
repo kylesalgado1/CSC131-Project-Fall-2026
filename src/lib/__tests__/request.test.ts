@@ -11,14 +11,13 @@ describe('buildRequest', () => {
       buildRequest(
         origin,
         destination,
-        { ...DEFAULT_SETTINGS, goal: 'minimize_time', maxWaitMinutes: 60 },
+        { ...DEFAULT_SETTINGS, maxWaitMinutes: 60 },
         now,
       ),
     ).toEqual({
       origin,
       destination,
       preferences: {
-        goal: 'minimize_time',
         maxWaitMinutes: 60,
         minSavingsMinutes: 10,
       },
@@ -98,11 +97,18 @@ describe('buildRequest', () => {
     expect(request).not.toHaveProperty('leaveBy');
   });
 
-  it('has sensible defaults: least driving, 10 minute minimum', () => {
-    expect(DEFAULT_SETTINGS).toMatchObject({
-      goal: 'minimize_time',
-      minSavingsMinutes: 10,
-    });
+  it('has sensible defaults: a 10 minute minimum, no wait limit', () => {
+    expect(DEFAULT_SETTINGS).toEqual({ minSavingsMinutes: 10 });
+  });
+
+  it('never sends a goal: the server works it out from the deadline', () => {
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      arriveBy: { hour: 17, minute: 0 },
+    };
+    expect(
+      buildRequest(origin, destination, settings, now).preferences,
+    ).not.toHaveProperty('goal');
   });
 
   describe('leave after', () => {
@@ -157,7 +163,6 @@ describe('buildRequest', () => {
         destination,
         {
           ...DEFAULT_SETTINGS,
-          goal: 'arrive_by',
           leaveAfter: { hour: 14, minute: 0 },
           arriveBy: { hour: 17, minute: 0 },
         },
@@ -167,7 +172,6 @@ describe('buildRequest', () => {
         new Date(2026, 9, 21, 14, 0).toISOString(),
       );
       expect(request.arriveBy).toBe(new Date(2026, 9, 21, 17, 0).toISOString());
-      expect(request.preferences?.goal).toBe('arrive_by');
     });
   });
 });

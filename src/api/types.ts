@@ -2,7 +2,6 @@
  * The shape of the backend's POST /verdict, as it arrives over the wire.
  * Dates are ISO 8601 strings. Keep in step with backend/prediction/types.ts.
  */
-export type Goal = 'minimize_time' | 'arrive_by';
 export type Confidence = 'High' | 'Medium' | 'Low';
 
 export interface LatLng {
@@ -29,7 +28,6 @@ export interface VerdictRequest {
   /** ISO 8601: the earliest time the user can be on the road. */
   leaveAfter?: string;
   preferences?: {
-    goal?: Goal;
     maxWaitMinutes?: number;
     minSavingsMinutes?: number;
   };
