@@ -65,6 +65,17 @@ export function resolveTime(time: ClockTime, now: Date): Date {
   return nextOccurrence(time, now);
 }
 
+/**
+ * The moment an earliest-departure time means, or undefined when it no longer
+ * applies. Unlike a deadline, a time that has passed today does not mean
+ * tomorrow: it means the user can already go.
+ */
+export function resolveEarliest(time: ClockTime, now: Date): Date | undefined {
+  const at = time.date ? parseDateKey(time.date) : new Date(now);
+  at.setHours(time.hour, time.minute, 0, 0);
+  return at.getTime() > now.getTime() ? at : undefined;
+}
+
 /** Which day a time falls on, in words. */
 export const dayOf = (time: ClockTime, now: Date): string =>
   dayName(resolveTime(time, now), now);

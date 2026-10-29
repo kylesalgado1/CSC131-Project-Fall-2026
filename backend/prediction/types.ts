@@ -23,6 +23,11 @@ export interface Preferences {
    * waits past it, though leaving now is always allowed.
    */
   leaveBy?: Date;
+  /**
+   * Optional earliest time to be on the road, such as when class ends.
+   * Planning starts then rather than now. Ignored once it has passed.
+   */
+  leaveAfter?: Date;
 }
 
 export interface TripRequest {

@@ -108,6 +108,7 @@ function Screen({ baseUrl = defaultBaseUrl(), fetchFn, locate }: Props) {
       />
 
       <TimeLimits
+        leaveAfter={settings.leaveAfter}
         leaveBy={settings.leaveBy}
         arriveBy={settings.arriveBy}
         onChange={(field, time) =>

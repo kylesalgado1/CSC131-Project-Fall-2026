@@ -1,3 +1,4 @@
+import { ClockTime } from '../clockTime';
 import { buildRequest, DEFAULT_SETTINGS } from '../request';
 
 const origin = { lat: 38.2383, lng: -122.0402 };
@@ -101,6 +102,72 @@ describe('buildRequest', () => {
     expect(DEFAULT_SETTINGS).toMatchObject({
       goal: 'minimize_time',
       minSavingsMinutes: 10,
+    });
+  });
+
+  describe('leave after', () => {
+    const settings = (leaveAfter: ClockTime) => ({
+      ...DEFAULT_SETTINGS,
+      leaveAfter,
+    });
+
+    it('sends the earliest departure when it is still ahead today', () => {
+      const request = buildRequest(
+        origin,
+        destination,
+        settings({ hour: 14, minute: 0 }),
+        now,
+      );
+      expect(request.leaveAfter).toBe(
+        new Date(2026, 9, 21, 14, 0).toISOString(),
+      );
+    });
+
+    it('sends the chosen day for a time that has one', () => {
+      const request = buildRequest(
+        origin,
+        destination,
+        settings({ hour: 8, minute: 0, date: '2026-10-23' }),
+        now,
+      );
+      expect(request.leaveAfter).toBe(
+        new Date(2026, 9, 23, 8, 0).toISOString(),
+      );
+    });
+
+    it('leaves it out once it has passed, instead of moving it to tomorrow', () => {
+      const request = buildRequest(
+        origin,
+        destination,
+        settings({ hour: 6, minute: 0 }),
+        now,
+      );
+      expect(request).not.toHaveProperty('leaveAfter');
+    });
+
+    it('is not sent when not set', () => {
+      expect(
+        buildRequest(origin, destination, DEFAULT_SETTINGS, now),
+      ).not.toHaveProperty('leaveAfter');
+    });
+
+    it('goes alongside a deadline, as in class ends at 2 and pick-up is by 5', () => {
+      const request = buildRequest(
+        origin,
+        destination,
+        {
+          ...DEFAULT_SETTINGS,
+          goal: 'arrive_by',
+          leaveAfter: { hour: 14, minute: 0 },
+          arriveBy: { hour: 17, minute: 0 },
+        },
+        now,
+      );
+      expect(request.leaveAfter).toBe(
+        new Date(2026, 9, 21, 14, 0).toISOString(),
+      );
+      expect(request.arriveBy).toBe(new Date(2026, 9, 21, 17, 0).toISOString());
+      expect(request.preferences?.goal).toBe('arrive_by');
     });
   });
 });

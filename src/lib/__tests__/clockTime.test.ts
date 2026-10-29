@@ -3,6 +3,7 @@ import {
   formatClockTime,
   fromWheels,
   nextOccurrence,
+  resolveEarliest,
   resolveTime,
   suggestedTime,
   toWheels,
@@ -170,5 +171,30 @@ describe('dates', () => {
     expect(dayOf({ hour: 9, minute: 0, date: '2026-10-24' }, now)).toBe(
       'Sat, Oct 24',
     );
+  });
+});
+
+describe('resolveEarliest', () => {
+  const now = at(15, 0); // 3:00 PM
+
+  it('is later today when the time is still ahead', () => {
+    expect(resolveEarliest({ hour: 16, minute: 30 }, now)).toEqual(at(16, 30));
+  });
+
+  it('is nothing once the time has passed today, not tomorrow', () => {
+    expect(resolveEarliest({ hour: 14, minute: 0 }, now)).toBeUndefined();
+    expect(resolveEarliest({ hour: 15, minute: 0 }, now)).toBeUndefined();
+  });
+
+  it('uses the chosen day, however far off', () => {
+    expect(
+      resolveEarliest({ hour: 8, minute: 0, date: '2026-10-23' }, now),
+    ).toEqual(at(8, 0, 23));
+  });
+
+  it('is nothing for a chosen day that has passed', () => {
+    expect(
+      resolveEarliest({ hour: 20, minute: 0, date: '2026-10-20' }, now),
+    ).toBeUndefined();
   });
 });

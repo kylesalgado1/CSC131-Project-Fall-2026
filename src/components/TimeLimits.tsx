@@ -3,12 +3,18 @@ import { ClockTime, suggestedTime } from '../lib/clockTime';
 import { TimeLimitsCard } from './TimeLimitsCard';
 import { TimePickerSheet } from './TimePickerSheet';
 
-type Field = 'leaveBy' | 'arriveBy';
+type Field = 'leaveAfter' | 'leaveBy' | 'arriveBy';
 
 const COPY: Record<
   Field,
   { title: string; explanation: string; suggestMinutesAhead: number }
 > = {
+  leaveAfter: {
+    title: 'Leave after',
+    explanation:
+      'The earliest you can be on the road, such as when class ends. The app plans from then, and ignores this once it has passed.',
+    suggestMinutesAhead: 60,
+  },
   leaveBy: {
     title: 'Leave by',
     explanation:
@@ -24,14 +30,15 @@ const COPY: Record<
 };
 
 interface Props {
+  leaveAfter?: ClockTime;
   leaveBy?: ClockTime;
   arriveBy?: ClockTime;
   /** A time was set, or cleared (undefined). */
   onChange: (field: Field, time: ClockTime | undefined) => void;
 }
 
-/** The Leave by and Arrive by rows, and the sheet that edits them. */
-export function TimeLimits({ leaveBy, arriveBy, onChange }: Props) {
+/** The Leave after, Leave by and Arrive by rows, and the sheet that edits them. */
+export function TimeLimits({ leaveAfter, leaveBy, arriveBy, onChange }: Props) {
   // Which time the sheet is for, kept after it closes so the title does not
   // change while the sheet slides away.
   const [field, setField] = useState<Field>('leaveBy');
@@ -49,8 +56,10 @@ export function TimeLimits({ leaveBy, arriveBy, onChange }: Props) {
   return (
     <>
       <TimeLimitsCard
+        leaveAfter={leaveAfter}
         leaveBy={leaveBy}
         arriveBy={arriveBy}
+        onEditLeaveAfter={() => edit('leaveAfter')}
         onEditLeaveBy={() => edit('leaveBy')}
         onEditArriveBy={() => edit('arriveBy')}
       />
@@ -58,7 +67,7 @@ export function TimeLimits({ leaveBy, arriveBy, onChange }: Props) {
         visible={open}
         title={title}
         explanation={explanation}
-        current={field === 'arriveBy' ? arriveBy : leaveBy}
+        current={{ leaveAfter, leaveBy, arriveBy }[field]}
         fallback={suggestedTime(new Date(), suggestMinutesAhead)}
         onSet={finish}
         onClear={() => finish(undefined)}

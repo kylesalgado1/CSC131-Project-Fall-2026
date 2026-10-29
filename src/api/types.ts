@@ -26,6 +26,8 @@ export interface VerdictRequest {
   arriveBy?: string;
   /** ISO 8601: the latest time to be on the road. */
   leaveBy?: string;
+  /** ISO 8601: the earliest time the user can be on the road. */
+  leaveAfter?: string;
   preferences?: {
     goal?: Goal;
     maxWaitMinutes?: number;

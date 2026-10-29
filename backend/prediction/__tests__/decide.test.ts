@@ -307,12 +307,18 @@ describe('decide', () => {
       expect(v.deadline?.marginMinutes).toBe(125 - 56);
     });
 
-    it('does the same with the arrive-by goal', () => {
+    it('answers the arrive-by goal with the latest departure that still has room to spare', () => {
+      // Arriving 10 minutes early at the latest means leaving at +60.
       const v = decide(
         slotsOf(EVENING),
         requestWith({ goal: 'arrive_by', arriveBy: min(125) }),
       );
-      expect(v.action).toBe('no_rush');
+      expect(v.action).toBe('leave_later');
+      expect(v.recommended.departAt).toEqual(min(60));
+      expect(v.deadline?.marginMinutes).toBe(14);
+      expect(v.reason).toBe(
+        'Your deadline is 2 hr 5 min away. Leaving in 1 hour still gets you there with 14 minutes to spare.',
+      );
     });
 
     it('still says leave now with little room: 15 minutes before the latest departure', () => {
@@ -444,13 +450,24 @@ describe('decide', () => {
       expect(v.deadline?.latestDeparture?.departAt).toEqual(min(240));
     });
 
-    it('is not used when the deadline is within 3 hours, though there is still no rush', () => {
+    it('is not used for least driving when the deadline is within 3 hours, though there is still no rush', () => {
+      const v = decide(
+        longSlots(() => 60, 330),
+        farRequest({ goal: 'minimize_time', arriveBy: min(150) }),
+      );
+      expect(v.action).toBe('no_rush');
+      expect(v.waitMinutes).toBe(0);
+    });
+
+    it('is used for the arrive-by goal even when the deadline is within 3 hours', () => {
+      // A 60 minute drive, arriving 10 minutes early at the latest: leave at +75.
       const v = decide(
         longSlots(() => 60, 330),
         farRequest({ arriveBy: min(150) }),
       );
-      expect(v.action).toBe('no_rush');
-      expect(v.waitMinutes).toBe(0);
+      expect(v.action).toBe('leave_later');
+      expect(v.recommended.departAt).toEqual(min(75));
+      expect(v.waitMinutes).toBe(75);
     });
 
     describe('past what can be planned', () => {
@@ -566,8 +583,10 @@ describe('decide', () => {
       expect(v.recommended.arriveAt.getTime()).toBeLessThanOrEqual(
         deadline.getTime(),
       );
-      expect(v.action).toBe('wait');
-      expect(v.waitMinutes).toBe(75);
+      // Leaving at +75 would arrive at +107, within 10 minutes of the
+      // deadline at +110, so the plan is the departure at +60.
+      expect(v.action).toBe('leave_later');
+      expect(v.waitMinutes).toBe(60);
     });
 
     it('applies the deadline to every goal', () => {
@@ -629,6 +648,161 @@ describe('decide', () => {
       const v = decide(slots, requestWith({ goal: 'minimize_time' }));
       expect(v.recommended.driveMinutes).toBe(32);
       expect(v.confidence).toBe('Low');
+    });
+  });
+
+  describe('the Arrive by goal with a deadline inside the forecast', () => {
+    const min = (minutes: number) => addMinutes(NOW, minutes);
+    const arriveBy = (prefs: Partial<Preferences> = {}) =>
+      requestWith({ goal: 'arrive_by', ...prefs });
+    const FLAT = Array(13).fill(30);
+
+    it('leaves as late as still arrives with 10 minutes to spare', () => {
+      // Deadline +180, a 30 minute drive: the last departure with 10 minutes
+      // in hand is +135, arriving at +165.
+      const v = decide(slotsOf(FLAT), arriveBy({ arriveBy: min(180) }));
+      expect(v.action).toBe('leave_later');
+      expect(v.recommended.departAt).toEqual(min(135));
+      expect(v.recommended.arriveAt).toEqual(min(165));
+      expect(v.deadline?.marginMinutes).toBe(15);
+    });
+
+    it('keeps to the same plan as traffic builds later, instead of leaving now', () => {
+      // 30 minutes until +90, then 45: +120 arrives at +165; +135 would be late.
+      const slots = slotsOf([
+        30, 30, 30, 30, 30, 30, 30, 45, 45, 45, 45, 45, 45,
+      ]);
+      const v = decide(slots, arriveBy({ arriveBy: min(180) }));
+      expect(v.action).toBe('leave_later');
+      expect(v.recommended.departAt).toEqual(min(120));
+      // Least driving would go now, because traffic only gets worse.
+      const fastest = decide(
+        slots,
+        requestWith({ goal: 'minimize_time', arriveBy: min(180) }),
+      );
+      expect(fastest.action).toBe('leave_now');
+    });
+
+    it('still respects a leave-by time', () => {
+      const v = decide(
+        slotsOf(FLAT),
+        arriveBy({ arriveBy: min(180), leaveBy: min(60) }),
+      );
+      expect(v.action).toBe('leave_later');
+      expect(v.recommended.departAt).toEqual(min(60));
+      expect(v.reason).toContain('as late as your leave-by time allows');
+    });
+
+    it('leaves now when there is no room to wait', () => {
+      const v = decide(slotsOf(FLAT), arriveBy({ arriveBy: min(35) }));
+      expect(v.action).toBe('leave_now');
+    });
+
+    it('still says it is late when leaving now misses the deadline', () => {
+      const v = decide(slotsOf(FLAT), arriveBy({ arriveBy: min(20) }));
+      expect(v.lateByMinutes).toBe(10);
+    });
+
+    it('does not change least driving', () => {
+      const v = decide(
+        slotsOf(FLAT),
+        requestWith({ goal: 'minimize_time', arriveBy: min(180) }),
+      );
+      expect(v.action).toBe('no_rush');
+    });
+  });
+
+  describe('leave after', () => {
+    // The user cannot leave for two hours, so every slot starts then.
+    const START = addMinutes(NOW, 120);
+    const min = (minutes: number) => addMinutes(START, minutes);
+    function slotsFrom(drives: number[]) {
+      return drives.map<SlotPrediction>((driveMinutes, i) => {
+        const departAt = min(i * 15);
+        return {
+          departAt,
+          driveMinutes,
+          arriveAt: addMinutes(departAt, driveMinutes),
+          confidence: 'High',
+          confidenceReason: 'High reason',
+        };
+      });
+    }
+    const EVENING = [56, 54, 52, 51, 51, 51, 51, 51, 51, 51, 51, 51, 51];
+
+    it('measures a wait from the earliest departure, not from now', () => {
+      // The wait is 75 minutes after 12:00 PM; the two hours before it are not
+      // part of the trade.
+      const v = decide(slotsFrom(CLEARING), requestWith());
+      expect(v.action).toBe('wait');
+      expect(v.waitMinutes).toBe(75);
+      expect(v.minutesSaved).toBe(28);
+      expect(v.arrivalDelayMinutes).toBe(47);
+      expect(v.leaveNow.departAt).toEqual(START);
+      expect(v.reason).toBe(
+        "Wait until 1:15 PM: you'll save 28 minutes in traffic and you arrive 47 minutes later.",
+      );
+    });
+
+    it('applies the longest wait from the earliest departure too', () => {
+      // 75 minutes after 12:00 PM fits a 90 minute limit, though it is more
+      // than 3 hours from now. A 15 minute limit rules it out.
+      const fits = decide(
+        slotsFrom(CLEARING),
+        requestWith({ maxWaitMinutes: 90 }),
+      );
+      expect(fits.action).toBe('wait');
+      const blocked = decide(
+        slotsFrom(CLEARING),
+        requestWith({ maxWaitMinutes: 15 }),
+      );
+      expect(blocked.action).toBe('leave_now');
+      expect(blocked.reason).toContain('15 minutes maximum');
+    });
+
+    it('says when to leave, not "now", when traffic builds', () => {
+      const v = decide(
+        slotsFrom([30, 30, 30, 30, 30, 30, 30, 45, 45, 45, 45, 45, 45]),
+        requestWith({ goal: 'minimize_time', arriveBy: min(170) }),
+      );
+      expect(v.action).toBe('leave_now');
+      expect(v.leaveNow.departAt).toEqual(START);
+      expect(v.reason).toBe(
+        'Traffic builds later, up to 45 minutes of driving instead of 30, so leaving at 12:00 PM is best.',
+      );
+    });
+
+    it('measures the room before the latest departure from the earliest one', () => {
+      const v = decide(
+        slotsFrom(EVENING),
+        requestWith({ goal: 'minimize_time', arriveBy: min(125) }),
+      );
+      expect(v.action).toBe('no_rush');
+      expect(v.reason).toContain('You have 1 hour after 12:00 PM before');
+    });
+
+    it('says when leaving at that time would be late', () => {
+      const v = decide(
+        slotsFrom(Array(13).fill(60)),
+        requestWith({ arriveBy: min(30) }),
+      );
+      expect(v.lateByMinutes).toBe(30);
+      expect(v.reason).toBe(
+        'Leave at 12:00 PM, you may be late by about 30 minutes.',
+      );
+    });
+
+    it('plans an arrive-by departure from the earliest time on', () => {
+      // Ready at 12:00 PM, a 5:00 PM-style deadline three hours on.
+      const v = decide(
+        slotsFrom(Array(13).fill(30)),
+        requestWith({ goal: 'arrive_by', arriveBy: min(180) }),
+      );
+      expect(v.action).toBe('leave_later');
+      expect(v.recommended.departAt).toEqual(min(135));
+      expect(v.reason).toBe(
+        'Your deadline is 5 hours away. Leaving at 2:15 PM still gets you there with 15 minutes to spare.',
+      );
     });
   });
 });

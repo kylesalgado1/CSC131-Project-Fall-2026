@@ -416,6 +416,21 @@ describe('WaitPlan', () => {
     });
   });
 
+  it('shows the plan while waiting for an earliest departure that is not yet', async () => {
+    const leave = sampleResponse('leave_now', NOW).verdict;
+    const earliest = {
+      ...leave.leaveNow,
+      departAt: new Date(NOW.getTime() + 120 * 60_000).toISOString(),
+      arriveAt: new Date(NOW.getTime() + 190 * 60_000).toISOString(),
+    };
+    const { root } = await render('wait', {
+      verdict: { ...leave, leaveNow: earliest, recommended: earliest },
+    });
+    expect(allText(root)).toContain('While you wait');
+    expect(allText(root)).toContain('Leave in 2 hr');
+    expect(allText(root)).toContain('Remind me 5 min before');
+  });
+
   it('can be set aside with "Leave now instead", and brought back', async () => {
     const { root, reminders } = await render('wait');
     await act(async () => {

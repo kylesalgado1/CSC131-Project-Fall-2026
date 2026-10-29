@@ -1,14 +1,28 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { ClockTime, dayOf, formatClockTime } from '../lib/clockTime';
+import {
+  ClockTime,
+  dayOf,
+  formatClockTime,
+  resolveEarliest,
+} from '../lib/clockTime';
+import { dayName } from '../lib/calendarDays';
 import { useTheme } from './theme';
 
 interface Props {
+  leaveAfter?: ClockTime;
   leaveBy?: ClockTime;
   arriveBy?: ClockTime;
+  onEditLeaveAfter: () => void;
   onEditLeaveBy: () => void;
   onEditArriveBy: () => void;
   /** For tests. */
   now?: () => Date;
+}
+
+/** Which day an earliest-departure time falls on, or that it is ignored. */
+function earliestDay(time: ClockTime, now: Date): string {
+  const at = resolveEarliest(time, now);
+  return at ? dayName(at, now) : 'passed, ignored';
 }
 
 function Row({
@@ -16,15 +30,22 @@ function Row({
   time,
   now,
   onPress,
+  earliest = false,
 }: {
   label: string;
   time?: ClockTime;
   now: Date;
   onPress: () => void;
+  /** An earliest-departure time that has passed is ignored, not moved to tomorrow. */
+  earliest?: boolean;
 }) {
   const theme = useTheme();
   const text = time ? formatClockTime(time) : 'Any time';
-  const day = time ? dayOf(time, now) : undefined;
+  const day = time
+    ? earliest
+      ? earliestDay(time, now)
+      : dayOf(time, now)
+    : undefined;
   return (
     <Pressable
       accessibilityRole="button"
@@ -55,10 +76,12 @@ function Row({
   );
 }
 
-/** The two time limits: the latest to leave and the latest to arrive. */
+/** The time limits: the earliest to leave, the latest to leave and the latest to arrive. */
 export function TimeLimitsCard({
+  leaveAfter,
   leaveBy,
   arriveBy,
+  onEditLeaveAfter,
   onEditLeaveBy,
   onEditArriveBy,
   now = () => new Date(),
@@ -72,6 +95,14 @@ export function TimeLimitsCard({
         { backgroundColor: theme.card, borderColor: theme.border },
       ]}
     >
+      <Row
+        label="Leave after"
+        time={leaveAfter}
+        now={current}
+        onPress={onEditLeaveAfter}
+        earliest
+      />
+      <View style={[styles.divider, { backgroundColor: theme.border }]} />
       <Row
         label="Leave by"
         time={leaveBy}
