@@ -67,12 +67,22 @@ describe('what the answer leaves to spend', () => {
     expect(departureTarget(v)).toBeUndefined();
   });
 
-  it('is nothing for the other answers', () => {
-    for (const action of ['leave_now'] as const) {
-      const v = { ...verdict, action };
-      expect(planKind(v)).toBeUndefined();
-      expect(departureTarget(v)).toBeUndefined();
-    }
+  it('is nothing for leaving now', () => {
+    const v = { ...verdict, action: 'leave_now' as const };
+    expect(planKind(v)).toBeUndefined();
+    expect(departureTarget(v)).toBeUndefined();
+  });
+
+  it('is a wait for leaving at an earliest time that is not yet', () => {
+    const v = {
+      ...verdict,
+      action: 'leave_now' as const,
+      generatedAt: NOW.toISOString(),
+      leaveNow: { ...verdict.leaveNow, departAt: at(120).toISOString() },
+      recommended: { ...verdict.leaveNow, departAt: at(120).toISOString() },
+    };
+    expect(planKind(v)).toBe('wait');
+    expect(departureTarget(v)).toBe(v.recommended);
   });
 });
 

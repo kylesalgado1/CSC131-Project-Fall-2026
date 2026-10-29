@@ -3,11 +3,24 @@ import { formatDuration, formatTime, plural } from './format';
 
 type TimeOptions = { locale?: string; timeZone?: string };
 
+/**
+ * True when the user cannot leave until later, so the earliest departure is
+ * not now. "Now" and "wait 60 minutes" then mean nothing, and times are used.
+ */
+export function startsLater(verdict: Verdict): boolean {
+  return (
+    Date.parse(verdict.leaveNow.departAt) - Date.parse(verdict.generatedAt) >=
+    60_000
+  );
+}
+
 /** The answers the main screen can give. */
 export function headline(verdict: Verdict, timeOptions?: TimeOptions): string {
   switch (verdict.action) {
     case 'leave_now':
-      return 'Leave now';
+      return startsLater(verdict)
+        ? `Leave at ${formatTime(verdict.leaveNow.departAt, timeOptions)}`
+        : 'Leave now';
     case 'no_rush':
       return 'No need to leave yet';
     case 'leave_later':
@@ -16,7 +29,9 @@ export function headline(verdict: Verdict, timeOptions?: TimeOptions): string {
         timeOptions,
       )}`;
     default:
-      return `Wait ${plural(verdict.waitMinutes, 'minute')}`;
+      return startsLater(verdict)
+        ? `Wait until ${formatTime(verdict.recommended.departAt, timeOptions)}`
+        : `Wait ${plural(verdict.waitMinutes, 'minute')}`;
   }
 }
 
@@ -60,7 +75,7 @@ export function optionViews(
     return []; // nothing to compare: the answer is that there is no rush
   }
   const now = view(
-    'Leave now',
+    startsLater(verdict) ? 'Earliest' : 'Leave now',
     verdict.leaveNow,
     verdict.action === 'leave_now',
   );
@@ -153,7 +168,9 @@ export function departureChange(
   }
   const when = formatTime(next.recommended.departAt, timeOptions);
   if (next.action === 'leave_now') {
-    return 'Update: traffic changed, so you should leave now.';
+    return startsLater(next)
+      ? `Update: traffic changed, so you should leave at ${when}.`
+      : 'Update: traffic changed, so you should leave now.';
   }
   if (next.action === 'leave_later' && flipped) {
     return `Update: the plan changed, so the best time to leave is ${when}.`;

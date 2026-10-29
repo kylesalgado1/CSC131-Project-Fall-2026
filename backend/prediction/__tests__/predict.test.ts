@@ -210,6 +210,114 @@ describe('slots for a far-off deadline', () => {
   });
 });
 
+describe('slots from the earliest time the user can leave', () => {
+  const LATER = new Date(NOW.getTime() + 2 * 60 * 60_000);
+  const after = (leaveAfter?: Date): TripRequest => ({
+    ...request,
+    preferences: { ...DEFAULT_PREFERENCES, leaveAfter },
+  });
+  const providers = {
+    baseline: flat(30),
+    live: new FakeLiveProvider({
+      available: true,
+      extraMinutes: 20,
+      incidents: [],
+    }),
+  };
+
+  it('start there instead of now', async () => {
+    const slots = await predictSlots(after(LATER), providers);
+    expect(slots).toHaveLength(13);
+    expect(slots[0].departAt).toEqual(LATER);
+    expect(slots[12].departAt.getTime() - LATER.getTime()).toBe(
+      3 * 60 * 60_000,
+    );
+  });
+
+  it('ignore a time that has passed, or is now', async () => {
+    for (const leaveAfter of [new Date(NOW.getTime() - 60_000), NOW]) {
+      const slots = await predictSlots(after(leaveAfter), providers);
+      expect(slots[0].departAt).toEqual(NOW);
+    }
+  });
+
+  it('leave live congestion behind, since it fades within the hour', async () => {
+    const slots = await predictSlots(after(LATER), providers);
+    expect(slots.every(slot => slot.driveMinutes === 30)).toBe(true);
+  });
+
+  it('reach a far deadline from the earliest time, not from now', async () => {
+    const deadline = new Date(LATER.getTime() + 8 * 60 * 60_000);
+    const slots = await predictSlots(
+      {
+        ...request,
+        preferences: {
+          ...DEFAULT_PREFERENCES,
+          leaveAfter: LATER,
+          arriveBy: deadline,
+        },
+      },
+      providers,
+    );
+    expect(slots[0].departAt).toEqual(LATER);
+    expect(slots[slots.length - 1].departAt.getTime()).toBeGreaterThanOrEqual(
+      deadline.getTime(),
+    );
+  });
+});
+
+describe('class ends at 2:00 PM, pick-up by 5:00 PM', () => {
+  // 9:00 AM Pacific now. A 30 minute drive that grows to 40 after 3:30 PM.
+  const morning = new Date('2026-10-29T16:00:00Z');
+  const twoPm = new Date('2026-10-29T21:00:00Z');
+  const fivePm = new Date('2026-10-30T00:00:00Z');
+  const threeThirty = new Date('2026-10-29T22:30:00Z');
+  const providers = {
+    baseline: new FakeBaselineProvider(at => (at < threeThirty ? 30 : 40)),
+    live: new NoLiveConditions(),
+  };
+  const ask = (preferences = {}) =>
+    getVerdict(
+      {
+        ...request,
+        now: morning,
+        preferences: {
+          ...DEFAULT_PREFERENCES,
+          goal: 'arrive_by',
+          arriveBy: fivePm,
+          leaveAfter: twoPm,
+          ...preferences,
+        },
+      },
+      providers,
+    );
+
+  it('recommends the latest safe departure, not 2:00 PM', async () => {
+    const { verdict } = await ask();
+    expect(verdict.action).toBe('leave_later');
+    expect(verdict.recommended.departAt).toEqual(
+      new Date('2026-10-29T23:00:00Z'), // 4:00 PM
+    );
+    expect(verdict.recommended.arriveAt).toEqual(
+      new Date('2026-10-29T23:40:00Z'), // 4:40 PM, 20 minutes to spare
+    );
+    expect(verdict.deadline?.marginMinutes).toBe(20);
+  });
+
+  it('never plans a departure before the earliest time', async () => {
+    const { slots } = await ask();
+    expect(slots[0].departAt).toEqual(twoPm);
+    expect(slots.every(s => s.departAt >= twoPm)).toBe(true);
+  });
+
+  it('is the same without a leave-after, since 4:00 PM is later anyway', async () => {
+    const { verdict } = await ask({ leaveAfter: undefined });
+    expect(verdict.recommended.departAt).toEqual(
+      new Date('2026-10-29T23:00:00Z'),
+    );
+  });
+});
+
 describe('getVerdict', () => {
   it('goes end to end from providers to a stay-or-go answer', async () => {
     // Congested for the first hour, then normal.

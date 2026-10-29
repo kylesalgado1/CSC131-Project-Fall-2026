@@ -5,6 +5,7 @@ import {
   departureChange,
   headline,
   optionViews,
+  startsLater,
   toneOf,
   tradeoffLines,
 } from '../verdictView';
@@ -258,6 +259,62 @@ describe('deadlineLines', () => {
     };
     expect(deadlineLines(tight, time)[0]).toBe(
       'You would arrive 12:00 PM, right at your 1:30 PM deadline.',
+    );
+  });
+});
+
+describe('a plan that starts later, because the user cannot leave yet', () => {
+  const at = (minutes: number) =>
+    new Date(NOW.getTime() + minutes * 60_000).toISOString();
+  // Class ends in two hours, so the earliest departure is then.
+  const later = (verdict: Verdict): Verdict => {
+    const earliest = {
+      ...verdict.leaveNow,
+      departAt: at(120),
+      arriveAt: at(190),
+    };
+    return {
+      ...verdict,
+      generatedAt: at(0),
+      leaveNow: earliest,
+      // Leaving at the earliest time is its own recommendation.
+      ...(verdict.action === 'leave_now' ? { recommended: earliest } : {}),
+    };
+  };
+
+  it('is detected from the earliest departure, not the action', () => {
+    expect(startsLater(leaveNow)).toBe(false);
+    expect(startsLater(wait)).toBe(false);
+    expect(startsLater(later(leaveNow))).toBe(true);
+    // Under a minute of lead is just now.
+    expect(
+      startsLater({
+        ...leaveNow,
+        generatedAt: at(0),
+        leaveNow: { ...leaveNow.leaveNow, departAt: at(0.5) },
+      }),
+    ).toBe(false);
+  });
+
+  it('gives a time instead of "now"', () => {
+    expect(headline(later(leaveNow), time)).toBe('Leave at 9:00 AM');
+  });
+
+  it('gives the time to wait until instead of a number of minutes', () => {
+    const verdict = {
+      ...later(wait),
+      recommended: { ...wait.recommended, departAt: at(180) },
+    };
+    expect(headline(verdict, time)).toBe('Wait until 10:00 AM');
+    expect(optionViews(verdict, time).map(o => o.title)).toEqual([
+      'Earliest',
+      'Wait until 10:00 AM',
+    ]);
+  });
+
+  it('says leave at that time when traffic changes', () => {
+    expect(departureChange(later(wait), later(leaveNow), time)).toBe(
+      'Update: traffic changed, so you should leave at 9:00 AM.',
     );
   });
 });

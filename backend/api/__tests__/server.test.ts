@@ -150,6 +150,23 @@ describe('POST /verdict', () => {
     assert.equal(body.verdict.action, 'leave_now');
   });
 
+  it('starts the forecast at a leave-after time', async () => {
+    const after = new Date(NOW.getTime() + 2 * 60 * 60_000).toISOString();
+    const body = (
+      await post(serverWith(), { ...trip, leaveAfter: after })
+    ).json();
+    assert.equal(body.slots[0].departAt, after);
+    assert.equal(body.verdict.leaveNow.departAt, after);
+  });
+
+  it('ignores a leave-after time that has passed', async () => {
+    const past = new Date(NOW.getTime() - 60_000).toISOString();
+    const body = (
+      await post(serverWith(), { ...trip, leaveAfter: past })
+    ).json();
+    assert.equal(body.slots[0].departAt, NOW.toISOString());
+  });
+
   describe('validation', () => {
     const cases: Array<[string, unknown]> = [
       ['a missing destination', { origin: trip.origin }],
@@ -171,6 +188,7 @@ describe('POST /verdict', () => {
       ],
       ['a malformed deadline', { ...trip, arriveBy: 'tomorrow' }],
       ['a malformed leave-by time', { ...trip, leaveBy: 'soon' }],
+      ['a malformed leave-after time', { ...trip, leaveAfter: 'later' }],
     ];
     for (const [name, payload] of cases) {
       it(`rejects ${name}`, async () => {

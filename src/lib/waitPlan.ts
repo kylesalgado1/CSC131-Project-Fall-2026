@@ -1,5 +1,6 @@
 import { DepartureOption, LatLng, Verdict } from '../api/types';
 import { formatDuration } from './format';
+import { startsLater } from './verdictView';
 
 /** How long before the departure time the reminder goes off. */
 export const REMINDER_LEAD_MINUTES = 5;
@@ -40,6 +41,9 @@ export function planKind(verdict: Verdict): 'wait' | 'window' | undefined {
     case 'wait':
     case 'leave_later':
       return 'wait';
+    // The user cannot leave until later: there is a wait until then.
+    case 'leave_now':
+      return startsLater(verdict) ? 'wait' : undefined;
     case 'no_rush':
       return 'window';
     default:

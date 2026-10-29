@@ -23,6 +23,7 @@ interface VerdictBody {
   destination: { lat: number; lng: number };
   arriveBy?: string;
   leaveBy?: string;
+  leaveAfter?: string;
   preferences?: {
     goal?: Goal;
     maxWaitMinutes?: number;
@@ -50,6 +51,7 @@ const verdictSchema = {
       destination: point,
       arriveBy: { type: 'string', format: 'date-time' },
       leaveBy: { type: 'string', format: 'date-time' },
+      leaveAfter: { type: 'string', format: 'date-time' },
       preferences: {
         type: 'object',
         additionalProperties: false,
@@ -154,8 +156,14 @@ export function buildServer({
     '/verdict',
     { schema: verdictSchema },
     async request => {
-      const { origin, destination, arriveBy, leaveBy, preferences } =
-        request.body;
+      const {
+        origin,
+        destination,
+        arriveBy,
+        leaveBy,
+        leaveAfter,
+        preferences,
+      } = request.body;
       return getVerdict(
         {
           route: { origin, destination },
@@ -165,6 +173,7 @@ export function buildServer({
             ...preferences,
             ...(arriveBy ? { arriveBy: new Date(arriveBy) } : {}),
             ...(leaveBy ? { leaveBy: new Date(leaveBy) } : {}),
+            ...(leaveAfter ? { leaveAfter: new Date(leaveAfter) } : {}),
           },
         },
         providers,

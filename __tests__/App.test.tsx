@@ -55,6 +55,7 @@ function backend(replies: Reply[], places: (q: string) => Place[] = () => []) {
     preferences: unknown;
     arriveBy?: string;
     leaveBy?: string;
+    leaveAfter?: string;
   }> = [];
   const searches: URL[] = [];
   const fetchFn = jest.fn(async (raw: string, init?: RequestInit) => {
@@ -459,7 +460,7 @@ describe('the answer', () => {
       await saveTrip(campusTrip);
       const api = backend([sampleResponse('leave_now', START)]);
       const root = await open(api);
-      expect(allText(root).filter(t => t === 'Any time')).toHaveLength(2);
+      expect(allText(root).filter(t => t === 'Any time')).toHaveLength(3);
       expect(lastRequest(api)).not.toHaveProperty('arriveBy');
       expect(lastRequest(api)).not.toHaveProperty('leaveBy');
     });
@@ -496,6 +497,23 @@ describe('the answer', () => {
       expect(allText(root)).toContain('5:45 PM');
       await flush(600);
       expect(lastRequest(api).leaveBy).toBe(atNext(17, 45));
+      expect(lastRequest(api)).not.toHaveProperty('arriveBy');
+    });
+
+    it('sets a leave-after time and sends it as the earliest departure', async () => {
+      await saveTrip(campusTrip);
+      const api = backend([sampleResponse('leave_now', START)]);
+      const root = await open(api);
+      press(root, 'Leave after');
+      expect(hasText(root, 'The earliest you can be on the road')).toBe(true);
+      pressExact(root, '5');
+      pressExact(root, '45');
+      pressExact(root, 'PM');
+      press(root, 'Set leave after');
+      expect(allText(root)).toContain('5:45 PM');
+      await flush(600);
+      expect(lastRequest(api).leaveAfter).toBe(atNext(17, 45));
+      expect(lastRequest(api)).not.toHaveProperty('leaveBy');
       expect(lastRequest(api)).not.toHaveProperty('arriveBy');
     });
 
@@ -536,7 +554,7 @@ describe('the answer', () => {
       pressExact(root, '9');
       press(root, 'Cancel');
       await flush(1000);
-      expect(allText(root).filter(t => t === 'Any time')).toHaveLength(2);
+      expect(allText(root).filter(t => t === 'Any time')).toHaveLength(3);
       expect(api.verdicts).toHaveLength(1);
     });
 
@@ -552,7 +570,7 @@ describe('the answer', () => {
       pressExact(root, 'Any time'); // the sheet's button, not the card's row
       await flush(600);
       expect(lastRequest(api)).not.toHaveProperty('leaveBy');
-      expect(allText(root).filter(t => t === 'Any time')).toHaveLength(2);
+      expect(allText(root).filter(t => t === 'Any time')).toHaveLength(3);
     });
 
     it('opens on the time already set, not a fresh suggestion', async () => {

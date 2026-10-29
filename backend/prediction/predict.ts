@@ -23,24 +23,34 @@ const WEATHER_EXTRA_HOURS = 3;
 export const LIVE_DECAY_MINUTES = 60;
 
 /**
- * When each departure slot is, slot 0 being "leave now". Every 15 minutes for
- * 3 hours. When the arrive-by deadline is farther off, more slots follow on
+ * The earliest the user can leave: now, or later if they said they cannot
+ * leave before then. Slot 0 is this moment.
+ */
+export function departureStart({ now, preferences }: TripRequest): Date {
+  const after = preferences.leaveAfter;
+  return after && after.getTime() > now.getTime() ? after : now;
+}
+
+/**
+ * When each departure slot is, slot 0 being "leave now" (or at the earliest
+ * time the user can leave). Every 15 minutes for 3 hours. When the arrive-by deadline is farther off, more slots follow on
  * the half hour, up to the deadline (at most 12 hours out), so a far-off
  * deadline can be answered with a departure time. Those sit on the clock, not
  * on "now", so the planned time holds still as the app refreshes.
  */
-export function slotTimesFor({ now, preferences }: TripRequest): Date[] {
+export function slotTimesFor(request: TripRequest): Date[] {
+  const start = departureStart(request);
   const times = Array.from(
     { length: HORIZON_MINUTES / SLOT_INTERVAL_MINUTES + 1 },
-    (_, i) => addMinutes(now, i * SLOT_INTERVAL_MINUTES),
+    (_, i) => addMinutes(start, i * SLOT_INTERVAL_MINUTES),
   );
-  const deadline = preferences.arriveBy;
+  const deadline = request.preferences.arriveBy;
   if (!deadline) {
     return times;
   }
   const grid = FAR_SLOT_INTERVAL_MINUTES * MINUTE_MS;
-  const horizonEnd = now.getTime() + HORIZON_MINUTES * MINUTE_MS;
-  const limit = now.getTime() + MAX_PLAN_MINUTES * MINUTE_MS;
+  const horizonEnd = start.getTime() + HORIZON_MINUTES * MINUTE_MS;
+  const limit = start.getTime() + MAX_PLAN_MINUTES * MINUTE_MS;
   // Through the first slot at or after the deadline, so the last one that
   // still makes it can be told from the end of the forecast.
   const end = Math.min(limit, Math.ceil(deadline.getTime() / grid) * grid);
