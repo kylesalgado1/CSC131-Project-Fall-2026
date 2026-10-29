@@ -34,6 +34,21 @@ The app's main screen asks the backend whether to leave now or wait, and shows t
 
 The app finds the backend at the same address Expo loaded it from, on port 3000. If that does not work (a tunnel, or a firewall), give it the address directly: `EXPO_PUBLIC_API_URL=http://YOUR-COMPUTER-IP:3000 npm start`. Your computer may ask to allow incoming connections for Node the first time.
 
+#### Using a shared, deployed backend
+
+To test from a phone on another network, or without running the backend yourself, deploy it once and point everyone's app at it. `render.yaml` describes the service for [Render](https://render.com) (free plan).
+
+1. Push the repo to GitHub. In Render choose **New, Blueprint** and pick the repo.
+2. Enter `DATABASE_URL` (the Supabase Session pooler string, see Supabase below) and, optionally, `TOMTOM_API_KEY`. Render stores them, so they are never committed.
+3. When it is live, check `https://YOUR-SERVICE.onrender.com/health`.
+4. In the project root `.env`, set `EXPO_PUBLIC_API_URL=https://YOUR-SERVICE.onrender.com`, then run `npm start -- -c` (`-c` clears the cache so the new address is picked up).
+
+The free plan sleeps after about 15 minutes idle, so the first request can take up to a minute. The API has no login, so do not share its address publicly: anyone with it can use your TomTom quota.
+
+#### Testing on a phone that is not on your Wi-Fi
+
+`npm run start:tunnel` serves the app through a tunnel, which needs `@expo/ngrok` (Expo offers to install it). The tunnel only carries the app, not the backend, so also set `EXPO_PUBLIC_API_URL` to a deployed backend as above.
+
 **Choosing a trip.** The card at the top has **From** and **To**. Tap either to search for a place or address (suggestions start at 3 letters), or pick a recent or well-known place. **From** also offers **Use my current location**, the default. The app asks for location permission the first time it needs it, while the app is open, and reads your position once for each answer, so the answer follows you while the app is open. It never tracks you in the background. If the phone cannot say where it is, the screen explains why and offers Settings, a starting address, or another try. The **⇅** button swaps start and destination when both are places. Your last trip and your recent places are remembered on the phone.
 
 **Leave by and Arrive by** sit under the trip card. Tap one and tap **Day** to pick a date from a calendar (today up to a year ahead, with arrows to change month), then scroll the hour, minute and AM/PM wheels (or tap a value). Leave by is the latest you want to be on the road: the app will not tell you to wait past it. Arrive by is the latest you need to be there: the app never suggests an arrival after it, and says how late you may be if leaving now cannot make it. A time on a chosen day means that moment (if that moment has passed, it becomes the next time the clock shows it). The advice plans up to 12 hours ahead, so a farther time is kept and the answer sharpens as it gets closer. "Any time" removes a limit.
