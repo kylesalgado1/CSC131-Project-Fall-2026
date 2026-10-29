@@ -71,6 +71,37 @@ describe('POST /verdict', () => {
     assert.deepEqual(implicit, explicit);
   });
 
+  describe('the goal follows from whether there is a deadline', () => {
+    // A 35 minute drive all day, so only the goal decides when to leave.
+    const flat = new FakeBaselineProvider(() => 35);
+    const inTwoHours = new Date(NOW.getTime() + 2 * 60 * 60_000).toISOString();
+
+    it('plans to arrive just in time when there is one', async () => {
+      const body = (
+        await post(serverWith(flat), { ...trip, arriveBy: inTwoHours })
+      ).json();
+      assert.equal(body.verdict.action, 'leave_later');
+      assert.ok(body.verdict.waitMinutes > 60);
+      assert.ok(body.verdict.deadline.marginMinutes >= 10);
+    });
+
+    it('waits only for clearing traffic when there is not', async () => {
+      const body = (await post(serverWith(flat), trip)).json();
+      assert.equal(body.verdict.action, 'leave_now');
+    });
+
+    it('still lets a client ask for least driving with a deadline', async () => {
+      const body = (
+        await post(serverWith(flat), {
+          ...trip,
+          arriveBy: inTwoHours,
+          preferences: { goal: 'minimize_time' },
+        })
+      ).json();
+      assert.notEqual(body.verdict.action, 'leave_later');
+    });
+  });
+
   it('no longer accepts the removed balance goal', async () => {
     const response = await post(serverWith(), {
       ...trip,
