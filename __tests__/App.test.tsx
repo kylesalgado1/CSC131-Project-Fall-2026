@@ -719,7 +719,7 @@ describe('weather credit', () => {
 
   it('links to Open-Meteo and to the license', async () => {
     await saveTrip(campusTrip);
-    const opened = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    const opened = jest.spyOn(Linking, 'openURL').mockResolvedValue();
     try {
       const root = await open(backend([sampleResponse('leave_now', START)]));
       tapLink(root, 'Weather data by Open-Meteo.com');
