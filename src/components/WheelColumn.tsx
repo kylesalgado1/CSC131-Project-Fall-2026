@@ -4,6 +4,7 @@ import {
   NativeSyntheticEvent,
   Pressable,
   ScrollView,
+  ScrollViewInstance,
   StyleSheet,
   Text,
   View,
@@ -36,7 +37,7 @@ export function WheelColumn({
   width,
 }: Props) {
   const theme = useTheme();
-  const scroll = useRef<ScrollView>(null);
+  const scroll = useRef<ScrollViewInstance>(null);
   const offsetFor = (index: number) => index * ITEM_HEIGHT;
 
   const goTo = (index: number, animated: boolean) => {
