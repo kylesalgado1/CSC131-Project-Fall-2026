@@ -27,6 +27,7 @@ import { useTheme } from './src/components/theme';
 import { TimeLimits } from './src/components/TimeLimits';
 import { TripCard } from './src/components/TripCard';
 import { VerdictCard } from './src/components/VerdictCard';
+import { WaitPlan } from './src/components/WaitPlan';
 import { useTrip } from './src/hooks/useTrip';
 import { useVerdict, VerdictSource } from './src/hooks/useVerdict';
 import { formatTime } from './src/lib/format';
@@ -183,6 +184,13 @@ function Screen({ baseUrl = defaultBaseUrl(), fetchFn, locate }: Props) {
       {response ? (
         <View style={styles.verdict}>
           <VerdictCard verdict={response.verdict} />
+          <WaitPlan
+            verdict={response.verdict}
+            baseUrl={baseUrl}
+            located={located}
+            locate={locate}
+            fetchFn={fetchFn}
+          />
         </View>
       ) : null}
 
