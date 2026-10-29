@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: wait-it-out-api
+    runtime: node
+    plan: free
+    rootDir: backend
+    # tsx is a devDependency and the start script needs it.
+    buildCommand: npm install --include=dev
+    startCommand: npm run serve
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Set these in the Render dashboard. They are secrets, so they are not
+      # stored here.
+      - key: DATABASE_URL
+        sync: false
+      - key: TOMTOM_API_KEY
+        sync: false
