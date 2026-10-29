@@ -170,6 +170,9 @@ export function buildServer({
           now: now(),
           preferences: {
             ...DEFAULT_PREFERENCES,
+            // With a deadline the aim is to arrive just in time; without one,
+            // to wait only when traffic clears. A client can still say which.
+            goal: arriveBy ? 'arrive_by' : 'minimize_time',
             ...preferences,
             ...(arriveBy ? { arriveBy: new Date(arriveBy) } : {}),
             ...(leaveBy ? { leaveBy: new Date(leaveBy) } : {}),

@@ -24,7 +24,7 @@ const COPY: Record<
   arriveBy: {
     title: 'Arrive by',
     explanation:
-      'The latest you need to get there. The app will not suggest a plan that arrives later.',
+      'The latest you need to get there. The app plans to leave as late as still gets you there with a little room to spare.',
     suggestMinutesAhead: 90,
   },
 };

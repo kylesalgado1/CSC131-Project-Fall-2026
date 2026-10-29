@@ -5,7 +5,7 @@ import { VerdictRequest } from '../types';
 const request: VerdictRequest = {
   origin: { lat: 38.2383, lng: -122.0402 },
   destination: { lat: 38.5593, lng: -121.4237 },
-  preferences: { goal: 'minimize_time' },
+  preferences: { minSavingsMinutes: 10 },
 };
 const body = sampleResponse('wait', new Date('2026-10-21T14:00:00Z'));
 

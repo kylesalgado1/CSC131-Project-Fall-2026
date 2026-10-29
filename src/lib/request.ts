@@ -1,8 +1,7 @@
-import { Goal, LatLng, VerdictRequest } from '../api/types';
+import { LatLng, VerdictRequest } from '../api/types';
 import { ClockTime, resolveEarliest, resolveTime } from './clockTime';
 
 export interface VerdictSettings {
-  goal: Goal;
   /** Longest wait the user will accept. Absent for no limit. */
   maxWaitMinutes?: number;
   /** Waiting must save at least this much to be recommended. */
@@ -16,7 +15,6 @@ export interface VerdictSettings {
 }
 
 export const DEFAULT_SETTINGS: VerdictSettings = {
-  goal: 'minimize_time',
   minSavingsMinutes: 10,
 };
 
@@ -41,7 +39,6 @@ export function buildRequest(
     ...(leaveBy ? { leaveBy: resolveTime(leaveBy, now).toISOString() } : {}),
     ...(earliest ? { leaveAfter: earliest.toISOString() } : {}),
     preferences: {
-      goal: settings.goal,
       ...(settings.maxWaitMinutes !== undefined
         ? { maxWaitMinutes: settings.maxWaitMinutes }
         : {}),
