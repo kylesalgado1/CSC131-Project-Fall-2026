@@ -4,6 +4,7 @@ import { LatLng, Place } from '../api/types';
 
 /** Story 3-1: suggestions start at three characters. */
 export const MIN_QUERY_LENGTH = 3;
+const MAX_SUGGESTIONS = 5;
 
 interface Options {
   baseUrl: string;
@@ -52,7 +53,11 @@ export function usePlaceSearch(
           signal: controller.signal,
         });
         if (!controller.signal.aborted) {
-          setState({ places, loading: false, forQuery: text });
+          setState({
+            places: places.slice(0, MAX_SUGGESTIONS),
+            loading: false,
+            forQuery: text,
+          });
         }
       } catch (error) {
         if (controller.signal.aborted || isAbort(error)) {

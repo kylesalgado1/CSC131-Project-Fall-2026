@@ -170,7 +170,7 @@ describe('first launch', () => {
 });
 
 describe('choosing places', () => {
-  it('searches for a destination, ranking by where the phone last was, and uses the pick', async () => {
+  it('starts destination search at three characters, shows up to five ranked suggestions, and uses the pick', async () => {
     (lastKnownLocation as jest.Mock).mockResolvedValue(HERE);
     const api = backend([sampleResponse('leave_now', START)], q => [
       {
@@ -180,20 +180,29 @@ describe('choosing places', () => {
         lat: 38.56,
         lng: -121.42,
       },
-      {
-        id: 'x',
-        name: `${q} Plaza`,
-        address: '1 Main St',
+      ...Array.from({ length: 5 }, (_, index) => ({
+        id: `match-${index + 1}`,
+        name: `${q} Plaza ${index + 1}`,
+        address: `${index + 1} Main St`,
         lat: 38.3,
         lng: -121.9,
-      },
+      })),
     ]);
     const root = await open(api);
     press(root, 'Where are you going?');
     expect(hasText(root, 'Where to?')).toBe(true);
-    typeInto(root, 'Search for a place or address', 'sac state');
+    typeInto(root, 'Search for a place or address', 'sa');
     await flush(400);
-    expect(api.searches[0].searchParams.get('q')).toBe('sac state');
+    expect(api.searches).toHaveLength(0);
+
+    typeInto(root, 'Search for a place or address', 'sac');
+    await flush(400);
+    expect(api.searches).toHaveLength(1);
+    expect(api.searches[0].searchParams.get('q')).toBe('sac');
+    for (const index of [1, 2, 3, 4]) {
+      expect(allText(root)).toContain(`sac Plaza ${index}`);
+    }
+    expect(allText(root)).not.toContain('sac Plaza 5');
     expect(api.searches[0].searchParams.get('lat')).toBe(String(HERE.lat));
     press(root, 'California State University, Sacramento');
     await flush(1);
