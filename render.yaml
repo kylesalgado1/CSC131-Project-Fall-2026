@@ -16,3 +16,47 @@ services:
         sync: false
       - key: TOMTOM_API_KEY
         sync: false
+      # Render's proxy sits in front of the service. Believing it (and only
+      # it) about the client's address lets the limit on new devices count
+      # per client instead of counting everybody as the proxy.
+      - key: TRUST_PROXY
+        value: "1"
+      # Trip monitoring for the iOS client: checking trips and sending alerts
+      # while the app is closed. It is opt-in and ships turned OFF, so merging
+      # this file changes nothing about the running service. This is the one
+      # deployment meant to run it: set the value to "on" deliberately, after
+      # migration 005 has been applied (npm run migrate in backend/) and the
+      # tick scheduler below is in place. Change it here: a value set in this
+      # file can replace a dashboard edit the next time the Blueprint syncs.
+      # While it is off the trip routes store what the app sends and plan
+      # nothing, and the app says the server is not running trip monitoring.
+      #
+      # The free plan puts the service to sleep after 15 idle minutes, and the
+      # in-process ticker sleeps with it. So on this plan the worker is only
+      # dependable while something outside calls
+      #   POST /internal/monitor/tick   (Authorization: Bearer <MONITOR_TICK_SECRET>)
+      # every minute, which also keeps the service awake: Supabase pg_cron
+      # with pg_net, or any cron service. Without that, alerts can be late or
+      # missing while the app is closed, and the app says so. On an always-on
+      # instance, add MONITOR_ALWAYS_ON with value "true" instead. See the
+      # README, "iOS client, trips and monitoring".
+      - key: MONITOR
+        value: "off"
+      # The rest are optional. Set them in the Render dashboard: they are
+      # secrets, so they are not stored here. MONITOR_TICK_SECRET is the
+      # secret for the tick route (at least 32 characters); unset, the route
+      # answers 404.
+      - key: MONITOR_TICK_SECRET
+        sync: false
+      # Apple push (APNs) credentials. Without them trips are still planned
+      # and monitored, and the app is told alerts cannot be sent.
+      # APNS_PRIVATE_KEY is the .p8 key's text on one line, with \n for each
+      # line break.
+      - key: APNS_KEY_ID
+        sync: false
+      - key: APNS_TEAM_ID
+        sync: false
+      - key: APNS_BUNDLE_ID
+        sync: false
+      - key: APNS_PRIVATE_KEY
+        sync: false

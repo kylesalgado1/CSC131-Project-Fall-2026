@@ -6,5 +6,7 @@ module.exports = {
     '/node_modules/',
     '/backend/db/__tests__/',
     '/backend/api/__tests__/',
+    '/backend/trips/__tests__/',
+    '/backend/push/__tests__/',
   ],
 };

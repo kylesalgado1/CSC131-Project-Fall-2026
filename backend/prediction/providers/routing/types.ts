@@ -8,6 +8,10 @@ export interface RoutePath {
   distanceMiles: number;
   /** Travel time with no traffic, when the service reports one. */
   freeFlowMinutes?: number;
+  /** Which routing service drew the path. Absent when it does not say. */
+  source?: 'tomtom' | 'osrm' | 'fixture';
+  /** True when the primary service failed and the fallback answered. */
+  fallback?: boolean;
 }
 
 /** A routing service that returns the path a driver would take. */

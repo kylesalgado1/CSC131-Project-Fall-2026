@@ -84,9 +84,10 @@ expo-env.d.ts
 /android
 /ios
 
-# Secrets (database URLs, certificates)
+# Secrets (database URLs, certificates, push keys)
 .env
 .env.*
 !.env.example
 *.pem
 *.crt
+*.p8

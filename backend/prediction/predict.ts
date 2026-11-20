@@ -9,7 +9,13 @@ import {
   WeatherProvider,
   weatherAt,
 } from './providers/weather';
-import { LatLng, Route, SlotPrediction, TripRequest } from './types';
+import {
+  LatLng,
+  PredictionSource,
+  Route,
+  SlotPrediction,
+  TripRequest,
+} from './types';
 
 export const SLOT_INTERVAL_MINUTES = 15;
 export const HORIZON_MINUTES = 180;
@@ -83,12 +89,14 @@ const midpointOf = ({ origin, destination }: Route): LatLng => ({
  * Live congestion is added on top of the baseline and fades out linearly,
  * since a current slowdown says little about traffic an hour from now. Rain
  * lengthens the baseline for the hours it falls in. A live feed or forecast
- * that fails is treated as unavailable; the baseline must succeed.
+ * that fails is treated as unavailable; the baseline must succeed. The answer
+ * also says where the figures came from: which baseline source, whether a
+ * fallback had to answer, and whether live conditions were available.
  */
-export async function predictSlots(
+export async function predict(
   request: TripRequest,
   { baseline, live: liveSource, weather, campusBreaks }: PredictionProviders,
-): Promise<SlotPrediction[]> {
+): Promise<{ slots: SlotPrediction[]; source: PredictionSource }> {
   const { route, now } = request;
   const departures = slotTimesFor(request);
   const weatherHours =
@@ -108,7 +116,7 @@ export async function predictSlots(
       : Promise.all(departures.map(at => baseline.getBaseline(route, at))),
   ]);
 
-  return departures.map((departAt, i) => {
+  const slots = departures.map((departAt, i) => {
     const base = bases[i];
     const liveFade = Math.max(
       0,
@@ -132,4 +140,20 @@ export async function predictSlots(
       holiday: specialDayName(localTime(departAt).date, campusBreaks),
     };
   });
+  return {
+    slots,
+    source: {
+      baseline: bases[0]?.source ?? 'unknown',
+      fallback: bases.some(base => base.fallback === true),
+      live: live.available,
+    },
+  };
+}
+
+/** The slots of `predict` alone, for callers that do not need the source. */
+export async function predictSlots(
+  request: TripRequest,
+  providers: PredictionProviders,
+): Promise<SlotPrediction[]> {
+  return (await predict(request, providers)).slots;
 }

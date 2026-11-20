@@ -110,8 +110,8 @@ npm run import-pems -- \
 
   Both days are included. The file starts empty, and the server refuses to start if an entry is malformed.
 
-- Everything TomTom sends is kept **in memory only, for minutes**. Do not store it in the database: TomTom's terms on storing responses are not clear for free plans, so check them before extending that.
-- The free plan allows about 2,500 requests a day and rate limits bursts. The client spaces requests out and retries when TomTom says "too many requests".
+- Everything TomTom sends is kept **in memory only, for minutes**. Do not store it in the database: TomTom's terms on storing responses are not clear for free plans, so check them before extending that. There is one exception, for a trip the iOS client asked the server to monitor (see "iOS client, trips and monitoring" below): the recommendation worked out for that trip (when to leave, the predicted arrival and drive time, the action, the confidence and the sentences that go with them) is kept in the database until the trip ends, and then erased. TomTom's raw responses and route geometry are never stored. **The team should confirm this exception against TomTom's terms** before relying on it.
+- The free plan's allowance is per month and per API, not per day: currently about 20,000 routing requests and 2,500 traffic-incident requests a month. It changes, so check the [TomTom pricing page](https://developer.tomtom.com/pricing). It also rate limits bursts. The client spaces requests out, retries when TomTom says "too many requests", and gives up on a request that takes longer than 15 seconds.
 
 **PeMS and OSRM take over if TomTom fails**, and `TRAFFIC_SOURCE=pems` forces them, which is useful for comparing the two. PeMS only covers the roads imported (the Suisun City to Sac State corridor), so outside it the PeMS model understates traffic and says so with low confidence.
 
@@ -131,7 +131,7 @@ cd backend && npm run rebuild-profiles -- --min-observed 0
 
 ### Location and privacy
 
-A trip that starts at the current location sends the phone's coordinates to our backend in each verdict request, and TomTom receives them as part of the route request. The server does not log requests or coordinates and stores nothing about them. Place search sends the typed text, and a rough position to rank nearby places first, to TomTom and to Photon (a search engine over OpenStreetMap data, run by komoot) through the backend. Set `PLACE_SEARCH_PHOTON=off` to keep search on TomTom only, or `PHOTON_URL` to use a Photon server you host. Location permission is asked for only while the app is open ("when in use"), and the app never reads location in the background.
+A trip that starts at the current location sends the phone's coordinates to our backend in each verdict request, and TomTom receives them as part of the route request. The server does not log requests or coordinates, and for a verdict, a route or a place search it stores nothing about them. The one thing it does store is a trip the iOS client asked it to monitor (see "iOS client, trips and monitoring" below). For an anonymous installation id (no account, name or email, only the hash of a random secret) it then keeps the trip's title, its start and destination coordinates, the destination's name, the arrival time and time zone, the recommendation worked out for it, the text of the alerts made for it, and the phone's push token. When a trip is cancelled or left, its recommendation and its alerts are erased at once. A cancelled trip that no alert was ever queued for is deleted at once too; any other row is deleted 24 hours after the trip is over (`TRIP_RETENTION_HOURS`). A trip past its arrival time is ended, and an installation with no active trip is deleted after 30 days without contact, by a retention run: hourly and a minute after start-up, on every server whether or not it runs the monitor, so on a host that sleeps when idle this happens when the server next runs. An installation is deleted at once when the app asks (`DELETE /devices/me`). Place search sends the typed text, and a rough position to rank nearby places first, to TomTom and to Photon (a search engine over OpenStreetMap data, run by komoot) through the backend. Set `PLACE_SEARCH_PHOTON=off` to keep search on TomTom only, or `PHOTON_URL` to use a Photon server you host. Location permission is asked for only while the app is open ("when in use"), and the app never reads location in the background.
 
 ### Tests and checks
 
@@ -153,13 +153,17 @@ The shared database is a Supabase Postgres project.
 3. If the connection fails with a certificate error, either download Supabase's CA certificate (Database settings, SSL configuration), set `DATABASE_SSL_CA` to its path and remove `sslmode` from the URL, or as a quick fallback append `?sslmode=no-verify` to the URL (encrypted, but the server's identity is not checked).
 4. `npm run migrate` creates the tables and turns on row-level security with no policies. That blocks Supabase's automatic REST API from reading or writing them, so only the backend can.
 
+Migration `005_trip_monitoring.sql` adds the tables for devices and monitored trips (the iOS client). Until it has been run, the device and trip routes answer 503 and the rest of the API works as before. Once it has been applied to the shared database it is frozen: put later changes in `006`. While working on it, use the tests (PGlite) or a private Postgres rather than the shared database.
+
 ### API
 
 ```sh
 cd backend && npm run serve    # PORT defaults to 3000
 ```
 
-`POST /verdict` takes a trip and returns the stay-or-go verdict plus the 13 departure slots behind it (15-minute steps over 3 hours). `GET /health` reports ok.
+`POST /verdict` takes a trip and returns the stay-or-go verdict plus the 13 departure slots behind it (15-minute steps over 3 hours). The response also carries `source`, which says where the figures came from: `baseline` (`tomtom`, `pems`, `fixture` or `unknown`), `fallback` (true when the main source failed and the fallback answered) and `live` (true when live conditions were available). It is an added field, so a client that does not know it is unaffected. `GET /health` reports ok.
+
+`POST /route` takes the same `origin` and `destination` and returns the driving path for drawing the trip on a map: `points` (at most 400, start to end), `distanceMiles`, `source` (`tomtom`, `osrm`, `fixture` or `unknown`) and `fallback`. It answers 502 `routing_unavailable` when no service can draw the path. The path comes from the cache the verdict already fills and is never stored.
 
 `GET /places?q=sac&lat=38.2&lng=-122.0` returns up to 5 places matching text being typed (at least 2 characters), closest to `lat`/`lng` first. Give both `lat` and `lng`, or neither. Short and informal names are matched first from a built-in list of campuses, stadiums and airports ("csus", "sac state", "ucla", "sofi" and so on, in `backend/places/aliases.ts`), then results from TomTom and Photon are merged, taking turns so neither crowds out the other and dropping repeats of the same place. The key stays on the server. A source that fails is skipped; the endpoint returns 502 only when every source fails and the text is not a known name. Results are kept in memory for 10 minutes and never stored. Photon's public server asks for fair use, and its results are credited to OpenStreetMap contributors under the results in the app.
 
@@ -183,3 +187,77 @@ curl -X POST localhost:3000/verdict -H 'content-type: application/json' -d '{
 | 500 `internal`            | Unexpected failure (details are logged, not returned)             |
 
 Route paths and traffic come from TomTom, with the public OSRM demo server as a development-only fallback, and rain from Open-Meteo. Open-Meteo's data is CC BY 4.0 and its free service is non-commercial only, so the app credits it under every live answer, with a link and a note that the data is changed. Keep that credit if you move the weather display, and look into a paid plan before any commercial launch.
+
+### iOS client, trips and monitoring
+
+The SwiftUI client (`CSC131UX/`) can ask the server to watch its trips and send alerts while the app is closed. None of this changes `/verdict`, `/places` or `/health`, which the React Native app keeps using as before, with no login.
+
+**How a trip is monitored.** A trip is "arrive at this place by this time". A server that runs the monitoring worker (see "Turning monitoring on" below) gives it a recommended departure as soon as the arrival time is within 11.5 hours, using the same verdict as `/verdict`. From 2 hours before that departure it checks traffic every 15 minutes. It sends one heads-up 90 minutes before the departure, an update when the departure moves by a 15-minute slot (at once when it moves earlier, after two checks agree when it moves later, at most 3 a trip), "Time to leave" at the departure, and "Running late" instead if the arrival time can no longer be met. Monitoring ends at the arrival time, or when the user taps "I've left". Alerts never promise to arrive: `sent` in the API means Apple accepted the alert, not that the phone showed it.
+
+**Endpoints.** There are no accounts. An installation registers once and gets a bearer credential; it can only see and change its own trips.
+
+| Endpoint                       | What it does                                                                                                                 |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `POST /devices`                | Registers an installation. Returns its `deviceId` and its `token`, shown once. No credential needed; 20 an hour per address. |
+| `PUT /devices/me/push`         | Stores the phone's APNs token and whether notifications are allowed.                                                         |
+| `DELETE /devices/me`           | Deletes the installation, its trips and its waiting alerts.                                                                  |
+| `PUT /trips`                   | Sends the complete list of trips to monitor, with a `revision`. Trips left out are cancelled. Safe to retry. 120 an hour.    |
+| `GET /trips`, `GET /trips/:id` | The state of each trip: its phase, recommendation, alerts sent, and whether the monitor can be counted on.                   |
+| `POST /trips/:id/departed`     | "I've left": ends that trip's monitoring.                                                                                    |
+| `POST /internal/monitor/tick`  | For a scheduler, not for the app: runs one round of monitoring. Needs `MONITOR_TICK_SECRET`.                                 |
+
+All but the first and the last need `Authorization: Bearer <token>`. Until migration `005` has been run they answer 503 `monitoring_unavailable`, and that is all that code means: the tables are not there. When the database cannot be reached they answer 503 `temporarily_unavailable` instead, which says nothing about what the server holds and is worth sending again. A value of the wrong JSON type (a `null` coordinate, say) is a 400; nothing is converted.
+
+**Turning monitoring on.** The worker is opt-in: a server only plans trips, checks them and sends alerts when started with `MONITOR=on`, and exactly one deployment should have it. `render.yaml` declares `MONITOR` for the shared deployment and ships it `"off"`, so merging and deploying changes nothing about the running service. To turn it on there, deliberately:
+
+1. Run migration `005` against the shared database (`cd backend && npm run migrate`).
+2. Set `MONITOR_TICK_SECRET` in the Render dashboard and have a scheduler call the tick route every minute (the recipes are below), or use an always-on instance with `MONITOR_ALWAYS_ON=true`.
+3. Set the `APNS_*` variables in the Render dashboard if alerts are to be sent.
+4. Change the value of `MONITOR` to `"on"` in `render.yaml` and deploy. If the service is managed by the Blueprint, change it there and not only in the dashboard: a value set in `render.yaml` can replace a dashboard edit the next time the Blueprint syncs.
+
+A server without `MONITOR=on` still takes devices and trips and stores them, but it plans nothing, checks nothing and sends nothing, and the app is told so (`monitor.enabled` is false; a trip stays in `planning` with no recommendation). The app then asks `/verdict` itself and says that the server is not running trip monitoring.
+
+That is what one server says about itself, not about the database. The trips, the waiting alerts and the daily budget live in the database, so a server without `MONITOR=on` that shares its database with the deployment that has it (a laptop pointed at the shared `DATABASE_URL`, for example) reports `monitor.enabled` false while that deployment's worker picks its trips up, spends the shared budget on them and sends real alerts. For development use a private database or `npm run serve:fixture`.
+
+| Variable                                                                                       | Meaning                                                                                                                                                                                |
+| ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MONITOR`                                                                                      | `on` runs the worker in this server. Anything else, or unset, leaves it off.                                                                                                           |
+| `MONITOR_TICK_SECONDS`                                                                         | How often the worker ticks inside the server (default 60).                                                                                                                             |
+| `MONITOR_TICK_SECRET`                                                                          | The secret for `POST /internal/monitor/tick`, at least 32 characters. Unset, the route answers 404.                                                                                    |
+| `MONITOR_ALWAYS_ON`                                                                            | `true` only on a host that never sleeps: tells the app the monitor can be counted on without a scheduler.                                                                              |
+| `MONITOR_DAILY_EVALUATION_BUDGET`                                                              | The most trip evaluations in a UTC day (default 150), to stay inside the TomTom allowance. `backend/.env.example` shows the arithmetic.                                                |
+| `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, `APNS_PRIVATE_KEY` or `APNS_PRIVATE_KEY_FILE` | Apple push credentials (a paid Apple Developer membership). Without them trips are still planned and monitored, and the app is told alerts cannot be sent. Never commit the `.p8` key. |
+| `TRUST_PROXY`                                                                                  | `1` behind Render's proxy, so the limit on new installations counts per client.                                                                                                        |
+
+The lead times and limits can be changed too; `backend/.env.example` lists them all.
+
+**Why the free Render plan alone is not a dependable worker.** The worker ticks inside the web service, and Render's free plan puts a service to sleep after about 15 minutes without an incoming request. A sleeping service checks nothing and sends nothing, so an alert can be late or missing exactly when the app is closed. The app is told (`monitor.dependable` is false) and says so. There are two ways to make it dependable:
+
+- An always-on instance (a paid plan), with `MONITOR_ALWAYS_ON=true`.
+- An outside scheduler that calls the tick route every minute, which also keeps the service awake. The route answers `202` at once and runs the tick behind the answer, because schedulers give up after a couple of seconds. Any cron service will do:
+
+  ```sh
+  curl -X POST https://YOUR-SERVICE.onrender.com/internal/monitor/tick \
+    -H "Authorization: Bearer $MONITOR_TICK_SECRET"
+  ```
+
+  Or from the Supabase database itself, with the `pg_cron` and `pg_net` extensions (turn both on under Database, Extensions), in the SQL editor:
+
+  ```sql
+  select cron.schedule(
+    'wait-it-out-monitor-tick',
+    '* * * * *',
+    $$
+    select net.http_post(
+      url := 'https://YOUR-SERVICE.onrender.com/internal/monitor/tick',
+      headers := '{"Content-Type": "application/json", "Authorization": "Bearer YOUR-MONITOR-TICK-SECRET"}'::jsonb
+    );
+    $$
+  );
+  ```
+
+  This recipe has not been run against our project yet. Check that both extensions are available on the project's plan. The secret sits in the job's SQL, where anyone with database access can read it. `cron.job_run_details` grows by a row a minute and is never cleaned up automatically. The first call after the service has slept is expected to time out while Render starts it.
+
+`cd backend && npm run monitor:tick` runs one tick from the command line (with `MONITOR=on`), for a scheduler that starts a process instead of calling a URL. It starts with nothing cached, so each tick costs more TomTom requests than calling the route. The web service needs `MONITOR=on` as well: what the app is told about the monitor comes from the web service, which only says monitoring is running when it runs it itself.
+
+**Trying it without a database, TomTom or Apple.** `cd backend && npm run serve:fixture` starts the whole API on port 3100 with simulated traffic, a clock that only moves when told, and alerts that are recorded instead of sent. Its answers are labelled as fixture data. `backend/scripts/serve-fixture.ts` lists the `/fixture` routes that move the clock, change the traffic and show what would have been sent. It is for development only and refuses to start in production.

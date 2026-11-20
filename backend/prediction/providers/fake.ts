@@ -8,6 +8,8 @@ export class FakeBaselineProvider implements BaselineProvider {
     private readonly minutesAt: (departAt: Date) => number,
     private readonly sampleCount = 100,
     private readonly observedShare?: number,
+    /** The source the figures claim to be from. Absent leaves it unsaid. */
+    private readonly source?: BaselineResult['source'],
   ) {}
 
   async getBaseline(_route: Route, departAt: Date): Promise<BaselineResult> {
@@ -15,6 +17,7 @@ export class FakeBaselineProvider implements BaselineProvider {
       minutes: this.minutesAt(departAt),
       sampleCount: this.sampleCount,
       observedShare: this.observedShare,
+      source: this.source,
     };
   }
 }

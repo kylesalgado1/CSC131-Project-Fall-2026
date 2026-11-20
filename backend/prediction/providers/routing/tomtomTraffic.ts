@@ -177,7 +177,12 @@ export class TomTomTraffic
     const { points, distanceMiles, noTrafficMinutes } = await this.liveRoute(
       route,
     );
-    return { points, distanceMiles, freeFlowMinutes: noTrafficMinutes };
+    return {
+      points,
+      distanceMiles,
+      freeFlowMinutes: noTrafficMinutes,
+      source: 'tomtom',
+    };
   }
 
   async getBaseline(route: Route, departAt: Date): Promise<BaselineResult> {
@@ -216,6 +221,7 @@ export class TomTomTraffic
         sampleCount: this.assumedHistoryDays,
         observedShare: 1,
         basis: holiday ? 'holiday_estimate' : undefined,
+        source: 'tomtom',
       };
     });
   }

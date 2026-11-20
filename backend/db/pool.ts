@@ -1,5 +1,6 @@
 import { readFileSync } from 'fs';
 import { Pool, PoolClient } from 'pg';
+import { errorName } from '../util/errorName';
 import { Database, Queryable } from './db';
 
 const wrap = (client: Pool | PoolClient): Queryable => ({
@@ -28,11 +29,34 @@ export function sslFromEnv(env = process.env): SslConfig | undefined {
   return caPath ? { ca: readFileSync(caPath, 'utf8') } : undefined;
 }
 
+/** Something that reports failures the way a `pg` Pool does. */
+export interface PoolErrorSource {
+  on(event: 'error', listener: (error: Error) => void): unknown;
+}
+
+/**
+ * Keeps a dropped idle connection from stopping the server. A pooler that
+ * closes a connection nobody is using makes the pool emit 'error', and Node
+ * exits on an 'error' nobody listens for. A server that stays awake to
+ * monitor trips will see this. The pool recovers by itself: it opens a new
+ * connection when next asked. Only the kind of failure is logged, since its
+ * message can name the database host.
+ */
+export function logPoolErrors(
+  pool: PoolErrorSource,
+  log: (line: string) => void = line => console.error(line),
+): void {
+  pool.on('error', error =>
+    log(`Database connection dropped: ${errorName(error)}`),
+  );
+}
+
 export function createPgDatabase(
   connectionString: string,
   ssl?: SslConfig,
 ): Database {
   const pool = new Pool({ connectionString, ssl });
+  logPoolErrors(pool);
   return {
     ...wrap(pool),
     async transaction(fn) {

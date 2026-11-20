@@ -287,6 +287,11 @@ export class TomTomPathProvider implements RoutePathProvider {
     const { points, distanceMiles, noTrafficMinutes } = await this.client.route(
       route,
     );
-    return { points, distanceMiles, freeFlowMinutes: noTrafficMinutes };
+    return {
+      points,
+      distanceMiles,
+      freeFlowMinutes: noTrafficMinutes,
+      source: 'tomtom',
+    };
   }
 }

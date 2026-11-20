@@ -41,6 +41,7 @@ export class OsrmPathProvider implements RoutePathProvider {
       points: route.geometry.coordinates.map(([lng, lat]) => ({ lat, lng })),
       distanceMiles: metersToMiles(route.distance),
       freeFlowMinutes: route.duration / 60,
+      source: 'osrm',
     };
   }
 }

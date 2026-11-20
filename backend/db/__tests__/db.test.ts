@@ -116,6 +116,7 @@ describe('migrations', () => {
       { version: '002_profile_observed_share.sql' },
       { version: '003_enable_rls.sql' },
       { version: '004_profile_free_flow.sql' },
+      { version: '005_trip_monitoring.sql' },
     ]);
   });
 

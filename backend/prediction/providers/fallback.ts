@@ -23,6 +23,16 @@ async function withFallback<T>(
   }
 }
 
+/** A copy of a result that says the fallback source produced it. */
+const viaFallback = <T extends object>(result: T): T & { fallback: true } => ({
+  ...result,
+  fallback: true,
+});
+
+/**
+ * Baselines from the primary source, or from the fallback when it fails.
+ * Every result the fallback produced is marked `fallback: true`.
+ */
 export class FallbackBaselineProvider implements BaselineProvider {
   constructor(
     private readonly primary: BaselineProvider,
@@ -33,7 +43,7 @@ export class FallbackBaselineProvider implements BaselineProvider {
   getBaseline(route: Route, departAt: Date): Promise<BaselineResult> {
     return withFallback(
       () => this.primary.getBaseline(route, departAt),
-      () => this.fallback.getBaseline(route, departAt),
+      async () => viaFallback(await this.fallback.getBaseline(route, departAt)),
       this.onFallback,
     );
   }
@@ -45,12 +55,16 @@ export class FallbackBaselineProvider implements BaselineProvider {
         : Promise.all(departAts.map(at => source.getBaseline(route, at)));
     return withFallback(
       () => all(this.primary),
-      () => all(this.fallback),
+      async () => (await all(this.fallback)).map(viaFallback),
       this.onFallback,
     );
   }
 }
 
+/**
+ * Paths from the primary service, or from the fallback when it fails. A path
+ * the fallback produced is marked `fallback: true`.
+ */
 export class FallbackPathProvider implements RoutePathProvider {
   constructor(
     private readonly primary: RoutePathProvider,
@@ -61,7 +75,7 @@ export class FallbackPathProvider implements RoutePathProvider {
   getPath(route: Route): Promise<RoutePath> {
     return withFallback(
       () => this.primary.getPath(route),
-      () => this.fallback.getPath(route),
+      async () => viaFallback(await this.fallback.getPath(route)),
       this.onFallback,
     );
   }

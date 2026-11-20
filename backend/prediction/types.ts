@@ -59,6 +59,23 @@ export interface BaselineResult {
    * a holiday or campus break guessed from a typical weekend.
    */
   basis?: 'holiday_estimate';
+  /** Which data source produced the figure. Absent when it does not say. */
+  source?: 'tomtom' | 'pems' | 'fixture';
+  /** True when the primary source failed and the fallback answered. */
+  fallback?: boolean;
+}
+
+/** Where the figures behind an answer came from. */
+export interface PredictionSource {
+  /** Which source produced the typical drive times. */
+  baseline: 'tomtom' | 'pems' | 'fixture' | 'unknown';
+  /**
+   * True when the configured primary source failed and the fallback
+   * answered.
+   */
+  fallback: boolean;
+  /** True when live conditions were available for this answer. */
+  live: boolean;
 }
 
 export interface LiveAdjustment {

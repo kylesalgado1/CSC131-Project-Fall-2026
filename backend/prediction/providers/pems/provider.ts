@@ -175,6 +175,7 @@ export class PemsBaselineProvider implements BaselineProvider {
       observedShare: measuredMiles / (coveredMiles + uncoveredMiles),
       // Holiday traffic estimated from weekends is a guess, and says so.
       basis: estimatedFromWeekends ? 'holiday_estimate' : undefined,
+      source: 'pems',
     };
   }
 }

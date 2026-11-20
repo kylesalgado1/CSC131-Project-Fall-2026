@@ -2,12 +2,20 @@
 // Fastify depends on an ES-module-only package that Jest cannot load.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildServer } from '../server';
+import { buildServer, MAX_ROUTE_POINTS, samplePath } from '../server';
 import { NoLiveConditions } from '../../prediction/providers/live';
-import { FakeBaselineProvider } from '../../prediction/providers/fake';
+import {
+  FakeBaselineProvider,
+  FakeLiveProvider,
+} from '../../prediction/providers/fake';
 import { BaselineProvider } from '../../prediction/providers/baseline';
 import { NoBaselineCoverageError } from '../../prediction/providers/pems/provider';
-import { RoutingError } from '../../prediction/providers/routing/types';
+import {
+  RoutePath,
+  RoutePathProvider,
+  RoutingError,
+} from '../../prediction/providers/routing/types';
+import { LatLng, Route } from '../../prediction/types';
 import { Place, PlaceSearch, SearchError } from '../../places/types';
 
 const NOW = new Date('2026-10-21T15:00:00Z');
@@ -198,6 +206,56 @@ describe('POST /verdict', () => {
     assert.equal(body.slots[0].departAt, NOW.toISOString());
   });
 
+  describe('where the figures came from', () => {
+    it('is unknown, with no live data, for providers that do not say', async () => {
+      const body = (await post(serverWith(), trip)).json();
+      assert.deepEqual(body.source, {
+        baseline: 'unknown',
+        fallback: false,
+        live: false,
+      });
+    });
+
+    it('names the source a provider gives', async () => {
+      const fixture = new FakeBaselineProvider(
+        () => 35,
+        100,
+        undefined,
+        'fixture',
+      );
+      const body = (await post(serverWith(fixture), trip)).json();
+      assert.equal(body.source.baseline, 'fixture');
+      assert.equal(body.source.fallback, false);
+    });
+
+    it('says when a fallback answered and when live data was used', async () => {
+      const fromFallback: BaselineProvider = {
+        getBaseline: async () => ({
+          minutes: 35,
+          sampleCount: 100,
+          source: 'pems',
+          fallback: true,
+        }),
+      };
+      const app = buildServer({
+        providers: {
+          baseline: fromFallback,
+          live: new FakeLiveProvider({
+            available: true,
+            extraMinutes: 0,
+            incidents: [],
+          }),
+        },
+        now: () => NOW,
+      });
+      assert.deepEqual((await post(app, trip)).json().source, {
+        baseline: 'pems',
+        fallback: true,
+        live: true,
+      });
+    });
+  });
+
   describe('validation', () => {
     const cases: Array<[string, unknown]> = [
       ['a missing destination', { origin: trip.origin }],
@@ -343,5 +401,240 @@ describe('GET /places', () => {
     assert.equal(res.statusCode, 502);
     assert.equal(res.json().error, 'search_unavailable');
     assert.ok(!res.body.includes('TomTom'));
+  });
+});
+
+describe('POST /route', () => {
+  /** Points in a straight line from the trip's start to its destination. */
+  const straight = (count: number): LatLng[] =>
+    Array.from({ length: count }, (_, i) => ({
+      lat:
+        trip.origin.lat +
+        ((trip.destination.lat - trip.origin.lat) * i) / (count - 1),
+      lng:
+        trip.origin.lng +
+        ((trip.destination.lng - trip.origin.lng) * i) / (count - 1),
+    }));
+  const serving = (path: RoutePath): RoutePathProvider => ({
+    getPath: async () => path,
+  });
+  const withPaths = (paths?: RoutePathProvider) =>
+    buildServer({
+      providers: { baseline: clearing, live: new NoLiveConditions() },
+      paths,
+      now: () => NOW,
+    });
+  const ask = (app: ReturnType<typeof withPaths>, payload: unknown = trip) =>
+    app.inject({ method: 'POST', url: '/route', payload: payload as object });
+
+  it('returns the path, its length and where it came from', async () => {
+    const points = straight(5);
+    const res = await ask(
+      withPaths(
+        serving({
+          points,
+          distanceMiles: 41.5,
+          freeFlowMinutes: 48,
+          source: 'tomtom',
+        }),
+      ),
+    );
+    assert.equal(res.statusCode, 200);
+    // The no-traffic time is not part of the answer.
+    assert.deepEqual(res.json(), {
+      points,
+      distanceMiles: 41.5,
+      source: 'tomtom',
+      fallback: false,
+    });
+  });
+
+  it('asks for the trip it was given', async () => {
+    const asked: Route[] = [];
+    const paths: RoutePathProvider = {
+      getPath: async route => {
+        asked.push(route);
+        return { points: straight(2), distanceMiles: 41.5 };
+      },
+    };
+    await ask(withPaths(paths));
+    assert.deepEqual(asked, [trip]);
+  });
+
+  it('says when the fallback service drew the path', async () => {
+    const body = (
+      await ask(
+        withPaths(
+          serving({
+            points: straight(3),
+            distanceMiles: 40,
+            source: 'osrm',
+            fallback: true,
+          }),
+        ),
+      )
+    ).json();
+    assert.equal(body.source, 'osrm');
+    assert.equal(body.fallback, true);
+  });
+
+  it('calls the source unknown when the service does not say', async () => {
+    const body = (
+      await ask(withPaths(serving({ points: straight(3), distanceMiles: 40 })))
+    ).json();
+    assert.equal(body.source, 'unknown');
+    assert.equal(body.fallback, false);
+  });
+
+  it('sends only coordinates for each point', async () => {
+    const tagged = straight(3).map((p, i) => ({ ...p, name: `stop ${i}` }));
+    const body = (
+      await ask(withPaths(serving({ points: tagged, distanceMiles: 40 })))
+    ).json();
+    assert.deepEqual(body.points, straight(3));
+  });
+
+  it('thins a long path to 400 points, keeping both ends', async () => {
+    const points = straight(2500);
+    const body = (
+      await ask(withPaths(serving({ points, distanceMiles: 41.5 })))
+    ).json();
+    assert.equal(body.points.length, 400);
+    assert.deepEqual(body.points[0], points[0]);
+    assert.deepEqual(body.points[399], points[2499]);
+    // Still in driving order: the line runs north, so latitude only grows.
+    const lats: number[] = body.points.map((p: LatLng) => p.lat);
+    assert.ok(lats.every((lat, i) => i === 0 || lat > lats[i - 1]));
+  });
+
+  it('sends a path of 400 points or fewer whole', async () => {
+    const points = straight(400);
+    const body = (
+      await ask(withPaths(serving({ points, distanceMiles: 41.5 })))
+    ).json();
+    assert.deepEqual(body.points, points);
+  });
+
+  it('ignores a property it does not know, such as a deadline', async () => {
+    const res = await ask(
+      withPaths(serving({ points: straight(2), distanceMiles: 41.5 })),
+      { ...trip, arriveBy: '2026-10-21T17:00:00Z' },
+    );
+    assert.equal(res.statusCode, 200);
+  });
+
+  it('says so when route geometry is not set up', async () => {
+    const res = await ask(withPaths(undefined));
+    assert.equal(res.statusCode, 503);
+    assert.deepEqual(res.json(), {
+      error: 'route_unavailable',
+      message: 'Route geometry is not set up on this server.',
+    });
+  });
+
+  it('says when routing is unavailable', async () => {
+    const failing: RoutePathProvider = {
+      getPath: async () => {
+        throw new RoutingError('TomTom request failed: HTTP 503');
+      },
+    };
+    const res = await ask(withPaths(failing));
+    assert.equal(res.statusCode, 502);
+    assert.equal(res.json().error, 'routing_unavailable');
+    assert.ok(!res.body.includes('TomTom'));
+  });
+
+  it('treats a path with no line to draw as a routing failure', async () => {
+    for (const points of [[], straight(2).slice(0, 1)]) {
+      const res = await ask(withPaths(serving({ points, distanceMiles: 0 })));
+      assert.equal(res.statusCode, 502);
+      assert.equal(res.json().error, 'routing_unavailable');
+    }
+  });
+
+  it('hides the details of an unexpected error', async () => {
+    const broken: RoutePathProvider = {
+      getPath: async () => {
+        throw new Error('connect to router.secret-host failed');
+      },
+    };
+    const res = await ask(withPaths(broken));
+    assert.equal(res.statusCode, 500);
+    assert.equal(res.json().error, 'internal');
+    assert.ok(!res.body.includes('secret-host'));
+  });
+
+  describe('validation', () => {
+    const cases: Array<[string, unknown]> = [
+      ['a missing origin', { destination: trip.destination }],
+      ['a missing destination', { origin: trip.origin }],
+      ['a latitude out of range', { ...trip, origin: { lat: 91, lng: 0 } }],
+      [
+        'a longitude out of range',
+        { ...trip, destination: { lat: 0, lng: -181 } },
+      ],
+      ['a point missing a coordinate', { ...trip, origin: { lat: 38 } }],
+      ['a point that is not an object', { ...trip, destination: 'campus' }],
+      ['a body that is not an object', [trip.origin, trip.destination]],
+    ];
+    for (const [name, payload] of cases) {
+      it(`rejects ${name}`, async () => {
+        const called: Route[] = [];
+        const paths: RoutePathProvider = {
+          getPath: async route => {
+            called.push(route);
+            return { points: straight(2), distanceMiles: 41.5 };
+          },
+        };
+        const res = await ask(withPaths(paths), payload);
+        assert.equal(res.statusCode, 400);
+        assert.equal(res.json().error, 'bad_request');
+        assert.equal(called.length, 0);
+      });
+    }
+  });
+});
+
+describe('samplePath', () => {
+  const numbered = (count: number): LatLng[] =>
+    Array.from({ length: count }, (_, i) => ({ lat: i, lng: -i }));
+  const indexes = (points: LatLng[]) => points.map(p => p.lat);
+
+  it('returns a path that is short enough as it is', () => {
+    const points = numbered(7);
+    assert.equal(samplePath(points, 7), points);
+    assert.equal(samplePath(points, 10), points);
+    assert.deepEqual(samplePath([], 10), []);
+  });
+
+  it('keeps the first and last points and strides evenly between', () => {
+    assert.deepEqual(indexes(samplePath(numbered(10), 4)), [0, 3, 6, 9]);
+    assert.deepEqual(
+      indexes(samplePath(numbered(101), 5)),
+      [0, 25, 50, 75, 100],
+    );
+    assert.deepEqual(indexes(samplePath(numbered(8), 2)), [0, 7]);
+  });
+
+  it('never repeats or reorders a point, whatever the length', () => {
+    for (const length of [401, 402, 799, 800, 801, 1234, 9999]) {
+      const picked = indexes(samplePath(numbered(length)));
+      assert.equal(picked.length, MAX_ROUTE_POINTS);
+      assert.equal(picked[0], 0);
+      assert.equal(picked[picked.length - 1], length - 1);
+      assert.ok(picked.every((at, i) => i === 0 || at > picked[i - 1]));
+    }
+  });
+
+  it('spreads the points it keeps evenly', () => {
+    const picked = indexes(samplePath(numbered(1234)));
+    const gaps = picked.slice(1).map((at, i) => at - picked[i]);
+    // 1233 steps over 399 gaps is just over 3 each.
+    assert.ok(Math.max(...gaps) - Math.min(...gaps) <= 1);
+  });
+
+  it('keeps both ends even when asked for fewer than two points', () => {
+    assert.deepEqual(indexes(samplePath(numbered(9), 1)), [0, 8]);
+    assert.deepEqual(indexes(samplePath(numbered(9), 0)), [0, 8]);
   });
 });

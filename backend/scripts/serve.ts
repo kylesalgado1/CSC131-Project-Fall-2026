@@ -11,98 +11,139 @@
  * entirely, which is handy for comparing the two. OSRM is the public demo
  * server and is for development only. Rain comes from Open-Meteo. PORT
  * defaults to 3000.
+ *
+ * The device and trip routes for the iOS client need the tables of migration
+ * 005 (npm run migrate) and answer 503 until they exist. Behind a host's
+ * proxy, set TRUST_PROXY so new devices are limited per client and not per
+ * proxy.
+ *
+ * Trip monitoring (checking trips and sending alerts while the app is
+ * closed) is opt-in: set MONITOR=on on the one deployment that should do it.
+ * It then ticks every MONITOR_TICK_SECONDS inside this process, and also
+ * whenever POST /internal/monitor/tick is called with MONITOR_TICK_SECRET.
+ * Alerts need the APNS_* variables; without them trips are still planned
+ * and monitored, and the app is told that alerts cannot be sent. Without
+ * MONITOR=on the trip routes store what the app sends and plan nothing: the
+ * app is told the monitor is off.
+ *
+ * Retention (ending trips past their arrival time, deleting what is over)
+ * runs on its own timer whether or not MONITOR is on.
  */
-import { buildServer } from '../api/server';
+import { buildServer, trustProxyFromEnv } from '../api/server';
 import { loadCampusBreaks } from '../config/campusBreaks';
+import { buildProviders } from '../config/providers';
 import { databaseFromEnv } from '../db/pool';
-import { CompositePlaceSearch } from '../places/compositePlaces';
-import { PhotonPlaces } from '../places/photonPlaces';
-import { CachedPlaceSearch } from '../places/cachedPlaces';
-import { TomTomPlaces } from '../places/tomtomPlaces';
-import { PlaceSearch } from '../places/types';
-import { PredictionProviders } from '../prediction/predict';
+import { pushSenderFromEnv } from '../push/apns';
 import {
-  FallbackBaselineProvider,
-  FallbackPathProvider,
-} from '../prediction/providers/fallback';
-import { NoLiveConditions } from '../prediction/providers/live';
-import { OpenMeteoWeatherProvider } from '../prediction/providers/openMeteo';
-import { PgProfileStore } from '../prediction/providers/pems/pgStore';
-import { PemsBaselineProvider } from '../prediction/providers/pems/provider';
+  monitorBudgetFromEnv,
+  monitorConfigFromEnv,
+  monitorSwitchesFromEnv,
+  tickSecondsFromEnv,
+} from '../trips/config';
 import {
-  CachedPathProvider,
-  OsrmPathProvider,
-} from '../prediction/providers/routing/osrm';
-import {
-  PathRouteResolver,
-  PgStationSource,
-} from '../prediction/providers/routing/pathResolver';
-import { TomTomClient } from '../prediction/providers/routing/tomtom';
-import { TomTomTraffic } from '../prediction/providers/routing/tomtomTraffic';
-import { CachedWeatherProvider } from '../prediction/providers/weather';
+  availabilityNotice,
+  shutDown,
+  startTicker,
+  Ticker,
+} from '../trips/ticker';
+import { wireMonitoring } from '../trips/wiring';
+import { HOUR_MS, MINUTE_MS } from '../util/time';
 
-function warnFallback(error: unknown) {
-  // TomTom errors never include the request URL, so the key cannot leak here.
-  console.warn(
-    `TomTom failed, using PeMS: ${
-      error instanceof Error ? error.message : error
-    }`,
-  );
-}
+/** Retention is first enforced this long after the server starts. */
+const FIRST_PURGE_DELAY_MS = MINUTE_MS;
+
+/** And then this often, for as long as the server runs. */
+const PURGE_INTERVAL_MS = HOUR_MS;
 
 async function main() {
   const db = databaseFromEnv();
   const campusBreaks = await loadCampusBreaks(process.env.CAMPUS_BREAKS_FILE);
-  const osrm = new CachedPathProvider(new OsrmPathProvider());
-  const apiKey = process.env.TOMTOM_API_KEY;
-  const useTomTom = Boolean(apiKey) && process.env.TRAFFIC_SOURCE !== 'pems';
-
-  const client = useTomTom ? new TomTomClient(apiKey!) : undefined;
-  const tomtom = client
-    ? new TomTomTraffic(client, { campusBreaks })
-    : undefined;
-  // Place search needs no key: Photon (OpenStreetMap) is always on unless
-  // PLACE_SEARCH_PHOTON=off, and TomTom joins it when there is a key.
-  const placeSources: PlaceSearch[] = [
-    ...(client ? [new TomTomPlaces(client)] : []),
-    ...(process.env.PLACE_SEARCH_PHOTON === 'off'
-      ? []
-      : [new PhotonPlaces(process.env.PHOTON_URL)]),
-  ];
-  const places = new CachedPlaceSearch(new CompositePlaceSearch(placeSources));
-  const pems = new PemsBaselineProvider(
-    new PgProfileStore(db),
-    new PathRouteResolver(
-      new PgStationSource(db),
-      tomtom ? new FallbackPathProvider(tomtom, osrm, warnFallback) : osrm,
-    ),
-    { campusBreaks },
-  );
-  const providers: PredictionProviders = {
-    baseline: tomtom
-      ? new FallbackBaselineProvider(tomtom, pems, warnFallback)
-      : pems,
-    live: tomtom ?? new NoLiveConditions(),
-    weather: new CachedWeatherProvider(new OpenMeteoWeatherProvider()),
+  const { providers, places, paths, description } = buildProviders(
+    db,
     campusBreaks,
-  };
-  console.log(
-    tomtom
-      ? 'Traffic source: TomTom, with PeMS as the fallback'
-      : apiKey
-      ? 'Traffic source: PeMS only (TRAFFIC_SOURCE=pems)'
-      : 'Traffic source: PeMS only (TOMTOM_API_KEY is not set)',
   );
+  console.log(description);
 
   console.log(`Campus breaks loaded: ${campusBreaks.length}`);
 
-  const app = buildServer({ providers, places });
+  const push = pushSenderFromEnv();
+  const { enabled, alwaysOn } = monitorSwitchesFromEnv();
+  const { monitor, trips, externalTick } = wireMonitoring({
+    db,
+    providers,
+    push,
+    config: monitorConfigFromEnv(),
+    budget: monitorBudgetFromEnv(),
+    enabled,
+    alwaysOn,
+  });
+  const app = buildServer({
+    providers,
+    places,
+    paths,
+    trips,
+    tickSecret: process.env.MONITOR_TICK_SECRET,
+    tick: externalTick,
+    trustProxy: trustProxyFromEnv(),
+  });
   const port = Number(process.env.PORT ?? 3000);
   await app.listen({ port, host: '0.0.0.0' });
   console.log(`Listening on port ${port}`);
+  // After listening, so a slow database cannot hold the server back. A
+  // database that cannot be reached is said to be that, not a missing
+  // migration, and does not stop the server: the routes try again.
+  const notice = await availabilityNotice(() => trips.isAvailable());
+  if (notice !== undefined) {
+    console.log(notice);
+  }
+  // Whether or not this server runs the monitor: what it stores must not
+  // outlive its retention because nobody happens to be syncing.
+  const retention = startTicker({
+    name: 'Trip purge',
+    intervalMs: PURGE_INTERVAL_MS,
+    firstDelayMs: FIRST_PURGE_DELAY_MS,
+    tick: () => trips.enforceRetention(),
+  });
+  let ticker: Ticker | undefined;
+  if (enabled) {
+    const seconds = tickSecondsFromEnv();
+    ticker = startTicker({
+      intervalMs: seconds * 1000,
+      // Looked up at every tick, so the tables can be created later
+      // without a restart.
+      tick: async () => {
+        if (await trips.isAvailable()) {
+          await monitor.tick();
+        }
+      },
+    });
+    console.log(
+      `Trip monitoring: on, every ${seconds}s, push ${
+        push.configured ? 'configured' : 'not configured'
+      }`,
+    );
+  } else {
+    console.log(
+      'Trip monitoring: off (set MONITOR=on on the one deployment that runs it)',
+    );
+  }
+  let stopping = false;
   const stop = async () => {
-    await app.close();
-    await db.close();
+    if (stopping) {
+      return;
+    }
+    stopping = true;
+    // The ticker first, and a tick under way is given time to finish
+    // before the push sender and the pool are closed under it.
+    await shutDown({
+      stopTimers: () => Promise.all([ticker?.stop(), retention.stop()]),
+      closeServer: () => app.close(),
+      idle: () => monitor.idle(),
+      closeConnections: async () => {
+        await push.close?.();
+        await db.close();
+      },
+    });
     process.exit(0);
   };
   process.on('SIGINT', stop);
