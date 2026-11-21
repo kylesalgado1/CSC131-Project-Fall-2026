@@ -1,0 +1,30 @@
+{
+  "name": "wait-it-out-backend",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Prediction engine and PeMS data pipeline",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "migrate": "tsx --env-file-if-exists=.env scripts/migrate.ts",
+    "import-pems": "tsx --env-file-if-exists=.env scripts/import-pems.ts",
+    "test": "node --import tsx --test \"db/__tests__/*.test.ts\" \"api/__tests__/*.test.ts\" \"trips/__tests__/*.test.ts\" \"push/__tests__/*.test.ts\"",
+    "serve": "tsx --env-file-if-exists=.env scripts/serve.ts",
+    "serve:fixture": "tsx scripts/serve-fixture.ts",
+    "monitor:tick": "tsx --env-file-if-exists=.env scripts/monitor-tick.ts",
+    "rebuild-profiles": "tsx --env-file-if-exists=.env scripts/rebuild-profiles.ts",
+    "check-trip": "tsx --env-file-if-exists=.env scripts/check-trip.ts"
+  },
+  "engines": {
+    "node": ">= 22.11.0"
+  },
+  "dependencies": {
+    "fastify": "^5.12.7",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.9",
+    "@types/node": "^26.6.5",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.15"
+  }
+}

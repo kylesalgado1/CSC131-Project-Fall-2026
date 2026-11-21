@@ -1,0 +1,30 @@
+PROMPT 0008 OF 0008
+TITLE: Verify the standalone demo and prepare team handoff
+
+PROJECT: WAIT IT OUT - STANDALONE iOS UX PROTOTYPE
+PLATFORM: Swift / SwiftUI, iOS 17+, Apple SDKs only
+
+STARTING POINT AND PURPOSE
+The user does NOT have the team's existing app. Build a new, independently runnable UX prototype from an empty directory. Later prompts extend only the prototype produced by earlier prompts. Do not request the team repository or invent existing team services. The purpose is to demonstrate and test the UX, then integrate the feature into the team's app later. Real traffic prediction, accounts, cloud infrastructure, and backend implementation are outside scope.
+
+PRODUCT CONTRACT
+Exactly three bottom tabs in this order: Map, Calendar, Settings (rightmost). Users set an activity's start/end time FIRST, ideal campus arrival SECOND; the app calculates leave-home time automatically. Departure is read-only. Calendar covers Sunday-Saturday and supports drag creation/resizing plus accessible time controls. Support weekly repeat days. Do not require separate study/parking/buffer inputs or a Calculate button. Ideal arrival already includes that extra time.
+
+ARCHITECTURE AND EXECUTION RULES
+Run 0001.txt through 0008.txt sequentially in the same prototype directory. For 0001, create the project. Thereafter inspect and extend files from earlier chunks; preserve working code. Read applicable AGENTS.md if present. If earlier prototype output is missing, identify the exact missing prerequisite rather than recreating a competing project.
+Use a thin standalone app host and a local Swift package named WaitItOutUX containing reusable feature code. The host owns the @main entry point and composes dependencies; the package owns domain models, services/interfaces, state, and SwiftUI screens. Use a small number of focused protocols at integration boundaries: activity/settings storage, commute estimation, and reminders. Keep date calculation pure and inject the clock. Avoid a generic framework, duplicate state, unnecessary abstractions, dependencies, force unwraps, TODOs, and inactive placeholder controls. All Swift files must belong to their intended build targets.
+Implement complete working code for this chunk and meaningful XCTest tests. Handle empty, invalid, normal, and failed operations. Keep UI mutations on the main actor and filesystem work off the UI thread. Mock service data must be clearly labeled as demo/test data; never imply live traffic or actual notification delivery. No LLM calls or agent logic in the app. Do not add C++ or Python app components.
+On macOS with Xcode, build and run the actual scheme/test targets. If unavailable, perform available static checks and report precisely which Apple-platform checks remain unverified. Never claim compilation, screenshots, or tests passed without execution. End with changed paths, run instructions, actual validation, and concrete blockers only. Update the project's README as relevant; do not modify the user's team app.
+
+ROLE: Senior iOS QA and integration engineer
+DEPENDENCIES: 0001-0007.
+
+Complete a focused end-to-end review of the standalone prototype. Verify launch from a clean checkout, correct local package references, simulator build settings, and actual target membership. Fix feature defects without adding production traffic services, accounts, cloud features, or recurrence exceptions.
+
+Exercise: create/drag a class, set ideal arrival, repeat weekdays, save, see calculated departure on Map and Calendar, preview a reminder, edit/delete, and relaunch. Check the two provided schedules in 60-minute test mode: departures 7:15 AM and 10:15 AM. Verify empty state, invalid inputs, overlapping events, overnight times, DST, storage/estimate/reminder errors, stale async responses, and large text/VoiceOver alternatives. No editable departure, required Calculate button, surprise permissions, or unlabeled simulated data should remain.
+
+Run meaningful unit tests and available UI tests/builds. Document exact commands and distinguish executed success from unverified Apple-platform behavior. If Xcode is unavailable, state that clearly; do not describe static inspection as a successful simulator build. Include a concise manual demo checklist and known limitations in README.md.
+
+Create docs/TEAM_INTEGRATION.md explaining the actual final package entry point, minimum deployment target, public models/protocols, dependency composition, shared state owner, persistence schema, sample-data isolation, and how to inject team adapters for commute estimates, activities/settings storage, reminders, and routing. Explain that the team should integrate the reusable package/root feature into its own app rather than copying the prototype's @main host or adding a competing app target. Describe how to map existing team models at boundaries and reuse its navigation/services without duplicate repositories. Do not invent any team API names; use the package's real interfaces as examples.
+
+Deliver a runnable prototype with clear demo labels and a practical handoff. List remaining integration work honestly: production travel estimates/routes, actual notification authorization/delivery, and mapping to the team's storage/models. Do not claim these integrations are already implemented.

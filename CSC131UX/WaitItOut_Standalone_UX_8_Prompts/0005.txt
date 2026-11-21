@@ -1,0 +1,28 @@
+PROMPT 0005 OF 0008
+TITLE: Calculate departure using an explicit test commute
+
+PROJECT: WAIT IT OUT - STANDALONE iOS UX PROTOTYPE
+PLATFORM: Swift / SwiftUI, iOS 17+, Apple SDKs only
+
+STARTING POINT AND PURPOSE
+The user does NOT have the team's existing app. Build a new, independently runnable UX prototype from an empty directory. Later prompts extend only the prototype produced by earlier prompts. Do not request the team repository or invent existing team services. The purpose is to demonstrate and test the UX, then integrate the feature into the team's app later. Real traffic prediction, accounts, cloud infrastructure, and backend implementation are outside scope.
+
+PRODUCT CONTRACT
+Exactly three bottom tabs in this order: Map, Calendar, Settings (rightmost). Users set an activity's start/end time FIRST, ideal campus arrival SECOND; the app calculates leave-home time automatically. Departure is read-only. Calendar covers Sunday-Saturday and supports drag creation/resizing plus accessible time controls. Support weekly repeat days. Do not require separate study/parking/buffer inputs or a Calculate button. Ideal arrival already includes that extra time.
+
+ARCHITECTURE AND EXECUTION RULES
+Run 0001.txt through 0008.txt sequentially in the same prototype directory. For 0001, create the project. Thereafter inspect and extend files from earlier chunks; preserve working code. Read applicable AGENTS.md if present. If earlier prototype output is missing, identify the exact missing prerequisite rather than recreating a competing project.
+Use a thin standalone app host and a local Swift package named WaitItOutUX containing reusable feature code. The host owns the @main entry point and composes dependencies; the package owns domain models, services/interfaces, state, and SwiftUI screens. Use a small number of focused protocols at integration boundaries: activity/settings storage, commute estimation, and reminders. Keep date calculation pure and inject the clock. Avoid a generic framework, duplicate state, unnecessary abstractions, dependencies, force unwraps, TODOs, and inactive placeholder controls. All Swift files must belong to their intended build targets.
+Implement complete working code for this chunk and meaningful XCTest tests. Handle empty, invalid, normal, and failed operations. Keep UI mutations on the main actor and filesystem work off the UI thread. Mock service data must be clearly labeled as demo/test data; never imply live traffic or actual notification delivery. No LLM calls or agent logic in the app. Do not add C++ or Python app components.
+On macOS with Xcode, build and run the actual scheme/test targets. If unavailable, perform available static checks and report precisely which Apple-platform checks remain unverified. Never claim compilation, screenshots, or tests passed without execution. End with changed paths, run instructions, actual validation, and concrete blockers only. Update the project's README as relevant; do not modify the user's team app.
+
+ROLE: Swift calculation and feature-state engineer
+DEPENDENCIES: 0001-0004.
+
+Add a small CommuteEstimating protocol with an asynchronous result containing duration, source label, and estimate timestamp. Implement a configurable test provider. Settings exposes a clearly labeled Test commute duration, initially 60 minutes, with validation. This is a prototype simulation, not measured traffic. Use explicit loading/success/unavailable/error result states and an injected clock.
+
+Implement the pure calculation leaveHome = idealArrival - travelDuration. Automatically calculate for relevant saved upcoming occurrences and recalculate after arrival, activity, destination, or test-duration edits. Do not subtract extra study/parking time. Do not use event start instead of ideal arrival. Keep departure read-only. Display results in Calendar details and a next-trip summary on Map.
+
+Reject zero, negative, nonfinite, or overflowing durations. Handle previous-day departure, DST, absent destination/estimate, and already-past departures. If the required departure is past, show that the target may be missed rather than replacing it with now and implying on-time arrival. Empty schedules show a useful calendar setup action. Bound work to a reasonable upcoming horizon, cancel stale async tasks, and prevent outdated results overwriting current edits.
+
+Tests must verify 8:15 AM arrival minus 60 minutes = 7:15 AM, and 11:15 AM minus 60 minutes = 10:15 AM. Cover changed durations, midnight crossings, DST, invalid results, no estimate, failure, cancellation, out-of-order responses, and updates after edits/deletion. Explain the service contract so a team provider can replace test data later.

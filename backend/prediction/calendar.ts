@@ -1,0 +1,246 @@
+/**
+ * Local-time and day-type helpers. Traffic follows the local clock and
+ * calendar, so everything here works on civil (year, month, day) dates in the
+ * app's time zone rather than UTC instants.
+ */
+
+export const LOCAL_TIME_ZONE = 'America/Los_Angeles';
+export const BUCKET_MINUTES = 15;
+export const BUCKETS_PER_DAY = (24 * 60) / BUCKET_MINUTES;
+
+export interface CivilDate {
+  year: number;
+  /** 1-12 */
+  month: number;
+  day: number;
+}
+
+export type DayType = 'weekday' | 'weekend' | 'holiday';
+
+/** A closed date range, such as spring break. Dates are YYYY-MM-DD. */
+export interface CampusBreak {
+  name: string;
+  start: string;
+  end: string;
+}
+
+export const toIso = ({ year, month, day }: CivilDate): string =>
+  `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+export function parseIso(iso: string): CivilDate {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) {
+    throw new Error(`Invalid date: ${iso}`);
+  }
+  return { year: Number(m[1]), month: Number(m[2]), day: Number(m[3]) };
+}
+
+/** The date and minute of day on the local clock at the given instant. */
+export function localTime(
+  at: Date,
+  timeZone: string = LOCAL_TIME_ZONE,
+): { date: CivilDate; minuteOfDay: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+  }).formatToParts(at);
+  const get = (type: string) => Number(parts.find(p => p.type === type)?.value);
+  return {
+    date: { year: get('year'), month: get('month'), day: get('day') },
+    minuteOfDay: get('hour') * 60 + get('minute'),
+  };
+}
+
+export const bucketOf = (minuteOfDay: number): number =>
+  Math.floor(minuteOfDay / BUCKET_MINUTES);
+
+/** 0 = Sunday ... 6 = Saturday */
+export const weekdayOf = ({ year, month, day }: CivilDate): number =>
+  new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+
+/** Day of month of the nth (1-based) given weekday in a month. */
+function nthWeekday(
+  year: number,
+  month: number,
+  weekday: number,
+  n: number,
+): number {
+  const first = weekdayOf({ year, month, day: 1 });
+  return 1 + ((weekday - first + 7) % 7) + (n - 1) * 7;
+}
+
+function lastWeekday(year: number, month: number, weekday: number): number {
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const last = weekdayOf({ year, month, day: lastDay });
+  return lastDay - ((last - weekday + 7) % 7);
+}
+
+const SUNDAY = 0;
+const MON = 1;
+const THU = 4;
+const SATURDAY = 6;
+
+/** Fixed-date holidays: [month, day, name]. */
+const FIXED: Array<[number, number, string]> = [
+  [1, 1, "New Year's Day"],
+  [3, 31, 'Cesar Chavez Day'],
+  [6, 19, 'Juneteenth'],
+  [7, 4, 'Independence Day'],
+  [11, 11, 'Veterans Day'],
+  [12, 25, 'Christmas Day'],
+];
+
+/** The day a fixed-date holiday is observed: Saturday -> Friday, Sunday -> Monday. */
+function observed(date: CivilDate): CivilDate {
+  const weekday = weekdayOf(date);
+  let shift = 0;
+  if (weekday === SATURDAY) {
+    shift = -1;
+  } else if (weekday === SUNDAY) {
+    shift = 1;
+  }
+  const d = new Date(Date.UTC(date.year, date.month - 1, date.day + shift));
+  return {
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
+  };
+}
+
+/**
+ * Name of the California holiday on this date, counting observed days.
+ * Columbus / Indigenous Peoples Day is not one: California does not close
+ * for it.
+ */
+export function holidayName(date: CivilDate): string | undefined {
+  const { year, month, day } = date;
+  const same = (m: number, d: number) => month === m && day === d;
+
+  for (const [m, d, name] of FIXED) {
+    if (same(m, d)) {
+      return name;
+    }
+  }
+  // An observed day can land in the neighboring year (Jan 1 on a Saturday).
+  for (const y of [year, year + 1]) {
+    for (const [m, d, name] of FIXED) {
+      const obs = observed({ year: y, month: m, day: d });
+      if (obs.year === year && obs.month === month && obs.day === day) {
+        return `${name} (observed)`;
+      }
+    }
+  }
+
+  if (same(1, nthWeekday(year, 1, MON, 3))) {
+    return 'Martin Luther King Jr. Day';
+  }
+  if (same(2, nthWeekday(year, 2, MON, 3))) {
+    return "Presidents' Day";
+  }
+  if (same(5, lastWeekday(year, 5, MON))) {
+    return 'Memorial Day';
+  }
+  if (same(9, nthWeekday(year, 9, MON, 1))) {
+    return 'Labor Day';
+  }
+  const thanksgiving = nthWeekday(year, 11, THU, 4);
+  if (same(11, thanksgiving)) {
+    return 'Thanksgiving';
+  }
+  if (same(11, thanksgiving + 1)) {
+    return 'Day after Thanksgiving';
+  }
+  return undefined;
+}
+
+/** The holiday or campus break on a date, if there is one. */
+export function specialDayName(
+  date: CivilDate,
+  breaks: CampusBreak[] = [],
+): string | undefined {
+  return holidayName(date) ?? campusBreakName(date, breaks);
+}
+
+export function campusBreakName(
+  date: CivilDate,
+  breaks: CampusBreak[],
+): string | undefined {
+  const iso = toIso(date);
+  return breaks.find(b => b.start <= iso && iso <= b.end)?.name;
+}
+
+/**
+ * Holidays and campus breaks get their own day type so predictions use
+ * matching historical days instead of ordinary weekday traffic.
+ */
+export function dayTypeOf(
+  date: CivilDate,
+  breaks: CampusBreak[] = [],
+): DayType {
+  if (holidayName(date) || campusBreakName(date, breaks)) {
+    return 'holiday';
+  }
+  const weekday = weekdayOf(date);
+  return weekday === 0 || weekday === 6 ? 'weekend' : 'weekday';
+}
+
+/** The civil date n days after (or before, if negative) the given one. */
+export function addDays(date: CivilDate, days: number): CivilDate {
+  const d = new Date(Date.UTC(date.year, date.month - 1, date.day + days));
+  return {
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
+  };
+}
+
+const MINUTE_MS = 60_000;
+
+/** A civil date and minute of day read as if it were UTC, in milliseconds. */
+const asUtcMs = (date: CivilDate, minuteOfDay: number): number =>
+  Date.UTC(date.year, date.month - 1, date.day) + minuteOfDay * MINUTE_MS;
+
+/**
+ * The instant at which the local clock in `timeZone` reads the given date and
+ * minute. Handles daylight saving: 07:00 in October is not 07:00 in November.
+ */
+export function instantAt(
+  date: CivilDate,
+  minuteOfDay: number,
+  timeZone: string = LOCAL_TIME_ZONE,
+): Date {
+  const wanted = asUtcMs(date, minuteOfDay);
+  let guess = wanted;
+  // Two passes settle it, since the offset only changes by an hour at most.
+  for (let i = 0; i < 2; i++) {
+    const shown = localTime(new Date(guess), timeZone);
+    guess -= asUtcMs(shown.date, shown.minuteOfDay) - wanted;
+  }
+  return new Date(guess);
+}
+
+/** An ISO 8601 string on the local clock with its UTC offset, e.g. ...-07:00. */
+export function formatWithOffset(
+  at: Date,
+  timeZone: string = LOCAL_TIME_ZONE,
+): string {
+  const shown = localTime(at, timeZone);
+  const minuteStart = Math.floor(at.getTime() / MINUTE_MS) * MINUTE_MS;
+  const offsetMinutes = Math.round(
+    (asUtcMs(shown.date, shown.minuteOfDay) - minuteStart) / MINUTE_MS,
+  );
+  const sign = offsetMinutes < 0 ? '-' : '+';
+  const abs = Math.abs(offsetMinutes);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const clock = `${pad(Math.floor(shown.minuteOfDay / 60))}:${pad(
+    shown.minuteOfDay % 60,
+  )}:00`;
+  return `${toIso(shown.date)}T${clock}${sign}${pad(
+    Math.floor(abs / 60),
+  )}:${pad(abs % 60)}`;
+}

@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "Wait It Out",
+    "slug": "wait-it-out",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "com.waititout"
+    },
+    "android": {
+      "package": "com.waititout"
+    },
+    "plugins": [
+      "expo-status-bar",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Wait It Out uses your location to start your trip from where you are. It is only used while the app is open."
+        }
+      ]
+    ]
+  }
+}
